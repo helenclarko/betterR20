@@ -231,6 +231,7 @@ const SCRIPTS = {
 		"5etools-importer",
 		"5etools-monsters",
 		"5etools-2024-import",
+		"5etools-charactermancer",
 		"5etools-spells",
 		"5etools-backgrounds",
 		"5etools-classes",
