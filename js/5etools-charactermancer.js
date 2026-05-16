@@ -1691,6 +1691,7 @@ function d20plus2024Charactermancer () {
 		// page(id:...) — return from cache immediately for our synthetic entries
 		if (body.includes("page(id:")) {
 			const idMatch = body.match(/page\(id:[^)]*?([a-f0-9]{24})/);
+			
 			if (idMatch) {
 				const cached = _pageCache.get(idMatch[1]);
 				if (cached) {
@@ -1723,6 +1724,10 @@ function d20plus2024Charactermancer () {
 		try { data = await response.json(); } catch (e) { return response; }
 
 		try {
+			// We only are adding on to the final page for now
+			if (data?.extensions?.pageNumber < data?.extensions?.totalPages)
+				return response
+			
 			// Used for filtering out results that don't apply
 			const filteredResults = (list, key, match, caseSensitive = true) => {
 				let result
