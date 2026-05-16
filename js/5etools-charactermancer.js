@@ -1726,7 +1726,7 @@ function d20plus2024Charactermancer () {
 		try {
 			// We only are adding on to the final page for now
 			if (data?.extensions?.pageNumber < data?.extensions?.totalPages)
-				return response
+				return new Response(JSON.stringify(data), {status: 200, headers: {"Content-Type": "application/json"}});
 			
 			// Used for filtering out results that don't apply
 			const filteredResults = (list, key, match, caseSensitive = true) => {
@@ -1935,6 +1935,13 @@ function d20plus2024Charactermancer () {
 						d20plus.ut.log(`[Charactermancer] Injected list definition: ${listName}`);
 					}
 				}
+			}
+
+			// Make sure total pages is at least 1 if anything has been added
+			// This prevents infinite reloading
+			if (pages?.length > 0 && data?.extensions?.totalPages == undefined) {
+				data.extensions.totalPages = 1;
+				data.extensions.pageNumber = 1;
 			}
 		} catch (e) {
 			console.error("[B20 Charactermancer]", e);
