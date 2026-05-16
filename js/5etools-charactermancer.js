@@ -1691,6 +1691,7 @@ function d20plus2024Charactermancer () {
 		// page(id:...) — return from cache immediately for our synthetic entries
 		if (body.includes("page(id:")) {
 			const idMatch = body.match(/page\(id:[^)]*?([a-f0-9]{24})/);
+			
 			if (idMatch) {
 				const cached = _pageCache.get(idMatch[1]);
 				if (cached) {
@@ -1723,6 +1724,32 @@ function d20plus2024Charactermancer () {
 		try { data = await response.json(); } catch (e) { return response; }
 
 		try {
+			// We only are adding on to the final page for now
+			if (data?.extensions?.pageNumber < data?.extensions?.totalPages)
+				return new Response(JSON.stringify(data), {status: 200, headers: {"Content-Type": "application/json"}});
+			
+			// Used for filtering out results that don't apply
+			const filteredResults = (list, key, match, caseSensitive = true) => {
+				let result
+				
+				if (!caseSensitive)
+					match = match.toLowerCase()
+
+				return list.filter( function (el) {
+					// If the key is missing, just filter it out
+					if (typeof el[key] != "string") {
+						return false;
+					}
+					if (!caseSensitive)
+						result = el[key].toLowerCase();
+					else
+						result = el[key];
+
+					// Filter out if key result doesn't match
+					return result.includes(match)
+				})
+			}
+
 			if (isBooks) {
 				const books = data?.data?.ruleSystem?.books;
 				if (Array.isArray(books) && !books.find(b => b.itemId === "5")) {
@@ -1740,6 +1767,18 @@ function d20plus2024Charactermancer () {
 					// Count how many times each name appears in our dataset
 					const nameCounts = {};
 					for (const x of all) { const k = x.name.toLowerCase(); nameCounts[k] = (nameCounts[k] || 0) + 1; }
+
+					// Apply filters
+					const filters = Array.from(body.matchAll(/[,{]v\s*:\s*\\"([^"\\]+)\\"/g)).map(m => m[1]);
+					if (filters.length > 0) {
+						const types = Array.from(body.matchAll(/[,{](?:field|k)\s*:\s*\\"([^"\\]+)\\"/g)).map(m => m[1]);
+
+						// Apply general filters
+						for (let i = 0; i < types.length; i++) {
+							if (types[i] == "name")
+								all = filteredResults(all, "name", filters[i], false);
+						}
+					}
 
 					const results = [];
 					for (const x of all) {
@@ -1896,6 +1935,13 @@ function d20plus2024Charactermancer () {
 						d20plus.ut.log(`[Charactermancer] Injected list definition: ${listName}`);
 					}
 				}
+			}
+
+			// Make sure total pages is at least 1 if anything has been added
+			// This prevents infinite reloading
+			if (pages?.length > 0 && data?.extensions?.totalPages == undefined) {
+				data.extensions.totalPages = 1;
+				data.extensions.pageNumber = 1;
 			}
 		} catch (e) {
 			console.error("[B20 Charactermancer]", e);
