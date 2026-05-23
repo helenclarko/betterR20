@@ -776,6 +776,7 @@ function d20plus2024Charactermancer () {
 		const sizeAbv  = (race.size || ["M"])[0];
 		const sizeName = SIZE_MAP[sizeAbv] || "Medium";
 		const walkSpd  = typeof race.speed === "number" ? race.speed : (race.speed?.walk || 30);
+		const otherSpd = Object.keys(race.speed).length > 0 ? race.speed : null;
 		const dv       = race.darkvision || 0;
 
 		// Ability score increases
@@ -819,6 +820,22 @@ function d20plus2024Charactermancer () {
 			name: "Walk Speed Base", parent: `${n} Speed`, level: "1",
 			payload: pay({type: "Speed", speed: "Walk", calculation: "Set Base", valueFormula: {flatValue: walkSpd}}),
 		});
+		if (otherSpd != null)
+			for (spd in otherSpd) {
+				if (spd == "walk")
+					continue;
+				
+				const spdName = spd.toTitleCase();
+				let spdNum = otherSpd[spd];
+				
+				if (spdNum === true)
+					spdNum = walkSpd;
+
+				recs.push({
+					name: `${spdNum} ${spdName} Speed Base`, parent: `${n} Speed`, level: "1",
+					payload: pay({type: "Speed", speed: spdName, calculation: "Set Base", valueFormula: {flatValue: spdNum}}),
+				});
+			}
 
 		// Darkvision
 		if (dv) {
