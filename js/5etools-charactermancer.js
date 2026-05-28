@@ -349,6 +349,51 @@ function d20plus2024Charactermancer () {
 
 	function pay (obj) { return JSON.stringify(obj); }
 
+	// ── General record builders ───────────────────────────────────────────────
+
+	function choiceRecord(name, choicesCount = 1, parentName = undefined, level = 1) {
+		return {
+			name: "", parent: parentName, level: level,
+			payload: pay({type:"Generic Choice",category:"",replace:false,numOfChoices:choicesCount})
+		}
+	}
+
+	function defenseRecord(defType, damageType, parentName = undefined, level = 1) {
+		const damageName = damageType.toTitleCase();
+
+		return {
+			name: `${damageName} ${defType}`, parent: parentName, level: level,
+			payload: pay({type:"Defense",defense:defType,damage:damageName}),
+		}
+	}
+
+	function defenseRecords(defType, list, level = 1) {
+		const recs = [];
+
+		if (!list || !(list.length > 0))
+			return recs;
+
+		// Choice counter in case there are multiple choices
+		let choiceNum = 1
+
+		// Add resistances
+		for (r of list) {
+			if (r.choose?.from?.length > 0) {
+				// Handle choice (This code is untested)
+				const choiceName = defType + " Choice " + choiceNum
+				recs.push(choiceRecord(choiceName, 1, undefined, level));
+
+				for (choice of r.choose.from) {
+					recs.push(defenseRecord(defType, r, choiceName, level));
+				}
+			}
+			else
+				recs.push(defenseRecord(defType, r, undefined, level));
+		}
+
+		return recs
+	}
+
 	// ── Class helpers ─────────────────────────────────────────────────────────
 
 	function savingThrows (cls) {
@@ -849,6 +894,11 @@ function d20plus2024Charactermancer () {
 				payload: pay({type: "Sense", name: "Darkvision", calculation: "Set Base", valueFormula: {flatValue: dv}}),
 			});
 		}
+
+		recs.push(...defenseRecords("Resistance", race.resist));
+		recs.push(...defenseRecords("Vulnerability", race.vulnerable));
+		recs.push(...defenseRecords("Immunity", race.immune));
+			
 
 		// Feature entries
 		for (const entry of (race.entries || [])) {
