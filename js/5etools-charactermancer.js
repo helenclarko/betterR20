@@ -358,16 +358,22 @@ function d20plus2024Charactermancer () {
 		}
 	}
 
-	function defenseRecord(defType, damageType, parentName = undefined, level = 1) {
+	function defenseRecord(defType, damageType, parentName = undefined, level = 1, isCondition = false) {
 		const damageName = damageType.toTitleCase();
+
+		const pl = {type:"Defense",defense:defType}
+		if (isCondition)
+			pl["condition"] = damageName
+		else
+			pl["damage"] = damageName
 
 		return {
 			name: `${damageName} ${defType}`, parent: parentName, level: level,
-			payload: pay({type:"Defense",defense:defType,damage:damageName}),
+			payload: pay(pl),
 		}
 	}
 
-	function defenseRecords(defType, list, level = 1) {
+	function defenseRecords(defType, list, level = 1, isCondition = false) {
 		const recs = [];
 
 		if (!list || !(list.length > 0))
@@ -381,14 +387,14 @@ function d20plus2024Charactermancer () {
 			if (r.choose?.from?.length > 0) {
 				// Handle choice
 				const choiceName = defType + " Choice " + choiceNum
-				recs.push(choiceRecord(choiceName, r.choose.count, undefined, level));
+				recs.push(choiceRecord(choiceName, r.choose.count, undefined, level, isCondition));
 
 				for (choice of r.choose.from) {
 					recs.push(defenseRecord(defType, choice, choiceName, level));
 				}
 			}
 			else
-				recs.push(defenseRecord(defType, r, undefined, level));
+				recs.push(defenseRecord(defType, r, undefined, level, isCondition));
 		}
 
 		return recs
@@ -899,7 +905,7 @@ function d20plus2024Charactermancer () {
 		recs.push(...defenseRecords("Resistance", race.resist));
 		recs.push(...defenseRecords("Vulnerability", race.vulnerable));
 		recs.push(...defenseRecords("Immunity", race.immune));
-			
+		recs.push(...defenseRecords("Condition Immunity", race.conditionImmune, 1, true));
 
 		// Feature entries
 		for (const entry of (race.entries || [])) {
@@ -1319,6 +1325,7 @@ function d20plus2024Charactermancer () {
 		recs.push(...defenseRecords("Resistance", feat.resist));
 		recs.push(...defenseRecords("Vulnerability", feat.vulnerable));
 		recs.push(...defenseRecords("Immunity", feat.immune));
+		recs.push(...defenseRecords("Condition Immunity", feat.conditionImmune, 1, true));
 
 		return recs;
 	}
