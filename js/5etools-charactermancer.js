@@ -336,7 +336,7 @@ function d20plus2024Charactermancer () {
 	}
 
 	function cleanProf (raw) {
-		return raw.replace(/\{@[a-z]+\s+/gi, "").replace(/\}/g, "").trim();
+		return raw.split("|", 1)[0].replace(/\{@[a-z]+\s+/gi, "").replace(/\}/g, "").trim();
 	}
 
 	function book (source) {
