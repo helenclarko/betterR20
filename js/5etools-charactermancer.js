@@ -353,7 +353,7 @@ function d20plus2024Charactermancer () {
 
 	function choiceRecord(name, choicesCount = 1, parentName = undefined, level = 1) {
 		return {
-			name: "", parent: parentName, level: level,
+			name: name, parent: parentName, level: level,
 			payload: pay({type:"Generic Choice",category:"",replace:false,numOfChoices:choicesCount})
 		}
 	}
@@ -379,12 +379,12 @@ function d20plus2024Charactermancer () {
 		// Add resistances
 		for (r of list) {
 			if (r.choose?.from?.length > 0) {
-				// Handle choice (This code is untested)
+				// Handle choice
 				const choiceName = defType + " Choice " + choiceNum
-				recs.push(choiceRecord(choiceName, 1, undefined, level));
+				recs.push(choiceRecord(choiceName, r.choose.count, undefined, level));
 
 				for (choice of r.choose.from) {
-					recs.push(defenseRecord(defType, r, choiceName, level));
+					recs.push(defenseRecord(defType, choice, choiceName, level));
 				}
 			}
 			else
@@ -895,6 +895,7 @@ function d20plus2024Charactermancer () {
 			});
 		}
 
+		// Defenses (Resistances, Vulnerabilities, and Immunities)
 		recs.push(...defenseRecords("Resistance", race.resist));
 		recs.push(...defenseRecords("Vulnerability", race.vulnerable));
 		recs.push(...defenseRecords("Immunity", race.immune));
@@ -1313,6 +1314,11 @@ function d20plus2024Charactermancer () {
 				});
 			}
 		}
+
+		// Defenses (Resistances, Vulnerabilities, and Immunities)
+		recs.push(...defenseRecords("Resistance", feat.resist));
+		recs.push(...defenseRecords("Vulnerability", feat.vulnerable));
+		recs.push(...defenseRecords("Immunity", feat.immune));
 
 		return recs;
 	}
