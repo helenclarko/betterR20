@@ -349,6 +349,57 @@ function d20plus2024Charactermancer () {
 
 	function pay (obj) { return JSON.stringify(obj); }
 
+	// ── General record builders ───────────────────────────────────────────────
+
+	function choiceRecord(name, choicesCount = 1, parentName = undefined, level = 1) {
+		return {
+			name: name, parent: parentName, level: level,
+			payload: pay({type:"Generic Choice",category:"",replace:false,numOfChoices:choicesCount})
+		}
+	}
+
+	function defenseRecord(defType, damageType, parentName = undefined, level = 1, isCondition = false) {
+		const damageName = damageType.toTitleCase();
+
+		const pl = {type:"Defense",defense:defType}
+		if (isCondition)
+			pl["condition"] = damageName
+		else
+			pl["damage"] = damageName
+
+		return {
+			name: `${damageName} ${defType}`, parent: parentName, level: level,
+			payload: pay(pl),
+		}
+	}
+
+	function defenseRecords(defType, list, level = 1, isCondition = false) {
+		const recs = [];
+
+		if (!list || !(list.length > 0))
+			return recs;
+
+		// Choice counter in case there are multiple choices
+		let choiceNum = 1
+
+		// Add resistances
+		for (r of list) {
+			if (r.choose?.from?.length > 0) {
+				// Handle choice
+				const choiceName = defType + " Choice " + choiceNum
+				recs.push(choiceRecord(choiceName, r.choose.count, undefined, level, isCondition));
+
+				for (choice of r.choose.from) {
+					recs.push(defenseRecord(defType, choice, choiceName, level));
+				}
+			}
+			else
+				recs.push(defenseRecord(defType, r, undefined, level, isCondition));
+		}
+
+		return recs
+	}
+
 	// ── Class helpers ─────────────────────────────────────────────────────────
 
 	function savingThrows (cls) {
@@ -776,6 +827,7 @@ function d20plus2024Charactermancer () {
 		const sizeAbv  = (race.size || ["M"])[0];
 		const sizeName = SIZE_MAP[sizeAbv] || "Medium";
 		const walkSpd  = typeof race.speed === "number" ? race.speed : (race.speed?.walk || 30);
+		const otherSpd = Object.keys(race.speed).length > 0 ? race.speed : null;
 		const dv       = race.darkvision || 0;
 
 		// Ability score increases
@@ -819,6 +871,22 @@ function d20plus2024Charactermancer () {
 			name: "Walk Speed Base", parent: `${n} Speed`, level: "1",
 			payload: pay({type: "Speed", speed: "Walk", calculation: "Set Base", valueFormula: {flatValue: walkSpd}}),
 		});
+		if (otherSpd != null)
+			for (spd in otherSpd) {
+				if (spd == "walk")
+					continue;
+				
+				const spdName = spd.toTitleCase();
+				let spdNum = otherSpd[spd];
+				
+				if (spdNum === true)
+					spdNum = walkSpd;
+
+				recs.push({
+					name: `${spdNum} ${spdName} Speed Base`, parent: `${n} Speed`, level: "1",
+					payload: pay({type: "Speed", speed: spdName, calculation: "Set Base", valueFormula: {flatValue: spdNum}}),
+				});
+			}
 
 		// Darkvision
 		if (dv) {
@@ -832,6 +900,12 @@ function d20plus2024Charactermancer () {
 				payload: pay({type: "Sense", name: "Darkvision", calculation: "Set Base", valueFormula: {flatValue: dv}}),
 			});
 		}
+
+		// Defenses (Resistances, Vulnerabilities, and Immunities)
+		recs.push(...defenseRecords("Resistance", race.resist));
+		recs.push(...defenseRecords("Vulnerability", race.vulnerable));
+		recs.push(...defenseRecords("Immunity", race.immune));
+		recs.push(...defenseRecords("Condition Immunity", race.conditionImmune, 1, true));
 
 		// Feature entries
 		for (const entry of (race.entries || [])) {
@@ -1246,6 +1320,12 @@ function d20plus2024Charactermancer () {
 				});
 			}
 		}
+
+		// Defenses (Resistances, Vulnerabilities, and Immunities)
+		recs.push(...defenseRecords("Resistance", feat.resist));
+		recs.push(...defenseRecords("Vulnerability", feat.vulnerable));
+		recs.push(...defenseRecords("Immunity", feat.immune));
+		recs.push(...defenseRecords("Condition Immunity", feat.conditionImmune, 1, true));
 
 		return recs;
 	}
