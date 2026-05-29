@@ -80,9 +80,13 @@ function d20plus2024Charactermancer () {
 
 	// ── Data cache ───────────────────────────────────────────────────────────
 
-	let _clsP = null, _raceP = null, _bgP = null, _subclsP = null, _featP = null, _subraceP = null, _itemsP = null, _packsP = null, _gearP = null, _spellsP = null;
+	let _clsP = null, _raceP = null, _bgP = null, _subclsP = null, _featP = null, _subraceP = null, _itemsP = null, _packsP = null, _gearP = null, _spellsP = null, _toolProfsP = null;
 	// Cache our synthesised entries by id so page(id:...) queries can be answered
 	const _pageCache = new Map();
+
+	// System version of the current character build — set when the user selects a class
+	// or species. "2024" → prefer XPHB content; "2014" → prefer PHB content; null → unknown.
+	let _buildVersion = null;
 
 	function getClasses () {
 		if (!_clsP) _clsP = DataLoader.pCacheAndGetAllSite("class").catch(() => []);
@@ -313,6 +317,42 @@ function d20plus2024Charactermancer () {
 		return _featP;
 	}
 
+	// Builds a map of proficiency list name → array of proficiency item names from 5etools data.
+	// Covers Artisan's Tools (AT), Gaming Sets (GS), Musical Instruments (INS).
+	function getToolProfLists () {
+		if (!_toolProfsP) {
+			_toolProfsP = (async () => {
+				const TYPE_MAP = {
+					"AT":  "Artisan's Tools Proficiency",
+					"GS":  "Gaming Sets Proficiency",
+					"INS": "Musical Instruments Proficiency",
+				};
+				// Load all items including base items
+				const [allItems, baseItems] = await Promise.all([
+					DataLoader.pCacheAndGetAllSite("item").catch(() => []),
+					DataLoader.pCacheAndGetAllSite("baseitem").catch(() => []),
+				]);
+				const combined = [...(allItems || []), ...(baseItems || [])];
+				const byList = {};
+				const seen = new Set();
+				for (const item of combined) {
+					const listName = TYPE_MAP[item.type];
+					if (!listName) continue;
+					// Deduplicate by name (base items + regular items may overlap)
+					const key = `${listName}|${item.name.toLowerCase()}`;
+					if (seen.has(key)) continue;
+					seen.add(key);
+					if (!byList[listName]) byList[listName] = [];
+					byList[listName].push(item.name);
+				}
+				// Sort each list alphabetically
+				for (const list of Object.values(byList)) list.sort();
+				return byList;
+			})().catch(() => ({}));
+		}
+		return _toolProfsP;
+	}
+
 	// ── Utilities ────────────────────────────────────────────────────────────
 
 	// Deterministic 24-char hex id from a string seed
@@ -343,10 +383,14 @@ function d20plus2024Charactermancer () {
 		return raw.replace(/\{@[a-z]+\s+/gi, "").replace(/\}/g, "").trim();
 	}
 
+	// 5etools sources that belong to the 2024 D&D system
+	const SRC_2024 = new Set(["XPHB","XDMG","XMM","TCE2024","PHB2024"]);
 	function book (source) {
 		return {
 			name: Parser.sourceJsonToFull(source) || source,
-			itemId: null, systemVersion: "", isOwned: true,
+			itemId: null,
+			systemVersion: SRC_2024.has(source) ? "2024" : "",
+			isOwned: true,
 			cost: 0, marketplaceLink: null, coverImage: null, notForSale: false, bundles: [],
 		};
 	}
@@ -1015,28 +1059,33 @@ function d20plus2024Charactermancer () {
 
 	// Keys that map to a list choice (not a fixed proficiency)
 	const BG_TOOL_LIST = {
-		anyGamingSet:        "Lists:Gaming Sets Proficiency",
-		anyMusicalInstrument:"Lists:Musical Instruments Proficiency",
-		anyArtisansTool:     "Lists:Artisan's Tools Proficiency",
+		anyGamingSet:         "Lists:Gaming Sets Proficiency",
+		anyMusicalInstrument: "Lists:Musical Instruments Proficiency",
+		anyArtisansTool:      "Lists:Artisan's Tools Proficiency",
 	};
-	// Keys that map to a fixed tool name
-	const BG_TOOL_NAME = {
-		thievesTools:         "Thieves' Tools",
-		disguiseKit:          "Disguise Kit",
-		forgeryKit:           "Forgery Kit",
-		herbalismKit:         "Herbalism Kit",
-		navigatorSTools:      "Navigator's Tools",
-		poisonersKit:         "Poisoner's Kit",
-		waterVehicles:        "Water Vehicles",
-		landVehicles:         "Land Vehicles",
-		"thieves' tools":     "Thieves' Tools",
-		"disguise kit":       "Disguise Kit",
-		"forgery kit":        "Forgery Kit",
-		"herbalism kit":      "Herbalism Kit",
-		"navigator's tools":  "Navigator's Tools",
-		"water vehicles":     "Water Vehicles",
-		"land vehicles":      "Land Vehicles",
+
+	// Convert a 5etools tool key to a human-readable display name.
+	//   "alchemist's supplies" → "Alchemist's Supplies"  (lowercase-with-spaces: title-case each word)
+	//   "disguiseKit"          → "Disguise Kit"           (camelCase: split on capitals)
+	//   "anyArtisansTool"      → "Artisan's Tool"         (camelCase: split + drop leading "Any ")
+	//   "vehicles (land)"      → "Land Vehicles"          (manual override)
+	const TOOL_NAME_OVERRIDE = {
+		anyArtisansTool:    "Artisan's Tools",
+		anyGamingSet:       "Gaming Set",
+		anyMusicalInstrument:"Musical Instrument",
+		"vehicles (land)":  "Land Vehicles",
+		"vehicles (water)": "Water Vehicles",
+		"vehicles (space)": "Space Vehicles",
 	};
+	function cleanToolName(key) {
+		if (TOOL_NAME_OVERRIDE[key]) return TOOL_NAME_OVERRIDE[key];
+		if (key.includes(" ")) {
+			return key.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+		}
+		// camelCase split + drop leading "Any "
+		const spaced = key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, " $1");
+		return spaced.replace(/^Any\s+/i, "").trim();
+	}
 
 	const BG_GOLD = {
 		Noble: 25, Knight: 25, Hermit: 5, Outlander: 10,
@@ -1071,7 +1120,7 @@ function d20plus2024Charactermancer () {
 		return result;
 	}
 
-	function buildBgRecords (bg, featByKey) {
+	function buildBgRecords (bg, featByKey, toolProfLists = {}) {
 		const recs = [];
 		const n = bg.name;
 
@@ -1098,22 +1147,26 @@ function d20plus2024Charactermancer () {
 		for (const [tool, val] of Object.entries(toolProfs)) {
 			if (!val || tool === "choose") continue;
 			const listRef = BG_TOOL_LIST[tool];
+			const toolDisplay = cleanToolName(tool);
 			if (listRef) {
 				const count = typeof val === "number" ? val : 1;
+				// Use explicit tool names from 5etools data (same approach as native Dwarf class).
+				// This avoids a "Lists:..." server query that returns 0 items and grays out the dropdown.
+				const listKey = listRef.replace("Lists:", "");
+				const toolNames = toolProfLists[listKey] || [];
+				const list = toolNames.length ? toolNames : [listRef];
 				recs.push({
-					name: `${tool} Proficiency`, parent: n, level: "1",
+					name: `${toolDisplay} Proficiency`, parent: n, level: "1",
 					builderDisplayName: "Background Proficiencies",
 					payload: pay({type: "Proficiency Choice", subtype: "Tool",
-						proficiencyLevel: "Proficient", list: [listRef], numOfChoices: count,
+						proficiencyLevel: "Proficient", list, numOfChoices: count,
 						increaseIfAlreadyAt: false}),
 				});
 			} else {
-				const toolName = BG_TOOL_NAME[tool] ||
-					(tool.charAt(0).toUpperCase() + tool.slice(1).replace(/([A-Z])/g, " $1").trim());
 				recs.push({
-					name: `${toolName} Proficiency`, parent: n, level: "1",
+					name: `${toolDisplay} Proficiency`, parent: n, level: "1",
 					builderDisplayName: "Background Proficiencies",
-					payload: pay({type: "Proficiency", category: "Tool", proficiency: toolName,
+					payload: pay({type: "Proficiency", category: "Tool", proficiency: toolDisplay,
 						proficiencyLevel: "Proficient", increaseIfAlreadyAt: false}),
 				});
 			}
@@ -1211,94 +1264,62 @@ function d20plus2024Charactermancer () {
 			}
 		}
 
-		// 2024 (XPHB) ability score options
+		// 2024 (XPHB) ability score options — native Roll20 uses "Ability Score Choice" type
 		if (bg.ability) {
-			const abiDesc = bg.ability.map(ab => {
-				if (ab.choose?.weighted) {
-					const w   = ab.choose.weighted;
-					const max = Math.max(...(w.weights || [2]));
-					const pool = (w.from || []).map(a => ABV[a] || a).join("/");
-					return `+${max} to one ${pool}, +1 to another ${pool}`;
+			// Use entry[0] for the themed ability pool (e.g. Int/Wis/Cha for Acolyte).
+			// XPHB format: weights:[2,1] gives total=3; split as (total-1)+1 = 2+1 records,
+			// matching native Roll20's "Select 2 ability score(s) +1" / "Select 1 ability score(s) +1".
+			// excludeFrom:"Local" on the first record prevents the same score appearing in both.
+			const ab = bg.ability[0];
+
+			if (ab?.choose?.weighted) {
+				const pool  = (ab.choose.weighted.from || []).map(a => ABV[a] || a);
+				const total = (ab.choose.weighted.weights || [1]).reduce((s, w) => s + w, 0);
+				recs.push({name: `${n} Ability Score Choice`, parent: n, level: "1",
+					builderDisplayName: "Background Ability Scores",
+					builderDisplayDescription: `Increase one of these scores by 2 and a different one by 1, or increase all three by 1. None of these increases can raise a score above 20. ${pool.join(", ")}\r\n`,
+					payload: pay({type: "Ability Score Choice", choose: total - 1, from: pool, increase: 1, excludeFrom: "Local"})});
+				recs.push({name: `${n} Ability Score Choice 2`, parent: n, level: "1",
+					payload: pay({type: "Ability Score Choice", choose: 1, from: pool, increase: 1})});
+			} else if (ab?.choose) {
+				const from   = (ab.choose.from || []).map(a => ABV[a] || a);
+				const count  = ab.choose.count  || 1;
+				const amount = ab.choose.amount || 1;
+				recs.push({name: `${n} Ability Score Choice`, parent: n, level: "1",
+					payload: pay({type: "Ability Score Choice", choose: count, from: from, increase: amount})});
+			} else if (ab) {
+				for (const [k, v] of Object.entries(ab)) {
+					if (k === "choose" || k === "hidden" || typeof v !== "number") continue;
+					recs.push({name: `${ABV[k] || k} Score Bonus`, parent: n, level: "1",
+						payload: pay({type: "Ability Score", ability: ABV[k] || k,
+							calculation: "Modify", valueFormula: {flatValue: v}})});
 				}
-				return Object.entries(ab).filter(([k]) => k !== "choose")
-					.map(([k, v]) => `+${v} ${ABV[k] || k}`).join(", ");
-			}).join("; or ");
-			recs.push({name: `${n} Ability Score Increase`, parent: n, level: "1",
-				payload: pay({type: "Features", name: "Ability Score Increase", description: abiDesc})});
+			}
 		}
 
-		// 2024 (XPHB) origin feat — embed the feat's spell choices directly
+		// 2024 (XPHB) origin feat — use "Feat Attach" to reference the native compendium feat.
+		// The limitations object pre-selects the spell list variant (e.g. "Magic Initiate - Cleric").
 		if (bg.feats) {
 			for (const featGroup of bg.feats) {
 				for (const featKey of Object.keys(featGroup)) {
 					if (!featKey || featKey === "choose") continue;
 					// featKey format: "magic initiate; cleric|xphb"
-					const [nameVariant, src = ""] = featKey.split("|");
+					const [nameVariant] = featKey.split("|");
 					const [baseName, variant = ""] = nameVariant.split(";").map(s => s.trim());
-					const featDisplay = (baseName + (variant ? ": " + variant : ""))
-						.replace(/\b\w/g, c => c.toUpperCase()).trim();
-					const featParent = `${n} Origin Feat`;
-					recs.push({
-						name: featParent, parent: n, level: "1",
-						builderDisplayName: `Origin Feat: ${featDisplay}`,
-						payload: pay({type: "Features", name: `Origin Feat: ${featDisplay}`,
-							description: `This background grants the ${featDisplay} feat.`}),
-					});
-
-					// Look up the feat and embed its spell choices
-					const feat = featByKey?.get(`${baseName.toLowerCase()}|${src.toLowerCase()}`);
-					if (feat?.additionalSpells?.length) {
-						// Find matching variant entry (e.g. "Cleric Spells" for variant "cleric")
-						const variantLc = variant.toLowerCase();
-						const entries = variantLc
-							? feat.additionalSpells.filter(e => e.name?.toLowerCase().startsWith(variantLc))
-							: feat.additionalSpells;
-						for (const entry of (entries.length ? entries : feat.additionalSpells.slice(0, 1))) {
-							// Cantrips
-							for (const item of (entry.known?._ || [])) {
-								if (typeof item !== "object" || typeof item.choose !== "string") continue;
-								if (!item.choose.includes("level=0")) continue;
-								const cm = item.choose.match(/class=([^|]+)/i);
-								recs.push({
-									name: `${featParent} Cantrips`, parent: featParent, level: "1",
-									builderDisplayName: `${featDisplay} Cantrips`,
-									payload: pay({type: "Spell Choice", spellLevel: 0,
-										includeBelow: false, includeCantrips: true,
-										choices: item.count || 1,
-										fromClassList: cm ? [cm[1].trim()] : [],
-										filter: [], list: [], replace: false}),
-								});
-							}
-							// Leveled spells
-							const daily = entry.innate?._?.daily || {};
-							for (const spells of Object.values(daily)) {
-								for (const item of (Array.isArray(spells) ? spells : [])) {
-									if (typeof item !== "object" || typeof item.choose !== "string") continue;
-									const lm = item.choose.match(/level=(\d+)/i);
-									if (!lm || parseInt(lm[1]) < 1) continue;
-									const spellLvl = parseInt(lm[1]);
-									const cm = item.choose.match(/class=([^|]+)/i);
-									const fromList = cm ? [cm[1].trim()] : [];
-									recs.push({
-										name: `${featParent} Level ${spellLvl} Spell`, parent: featParent, level: "1",
-										builderDisplayName: `${featDisplay} Level ${spellLvl} Spell`,
-										payload: pay({type: "Spell Choice", spellLevel: spellLvl,
-											includeBelow: false, includeCantrips: false,
-											choices: item.count || 1, fromClassList: fromList,
-											filter: [], list: [], replace: false}),
-									});
-									recs.push({
-										name: `${featParent} Replace Spell`, parent: featParent, level: "1",
-										builderDisplayName: `Replace ${featDisplay} Spell`,
-										payload: pay({type: "Spell Choice", spellLevel: spellLvl,
-											includeBelow: false, includeCantrips: false,
-											choices: 1, fromClassList: fromList,
-											filter: [], list: [], replace: true}),
-									});
-								}
-							}
-						}
+					const baseFeatName = baseName.replace(/\b\w/g, c => c.toUpperCase()).trim();
+					const variantTitle = variant ? variant.charAt(0).toUpperCase() + variant.slice(1) : "";
+					const payload = {type: "Feat Attach", feats: [baseFeatName]};
+					if (variantTitle) {
+						payload.limitations = {
+							choiceName:  `${baseFeatName} Spell List Choice`,
+							optionNames: [`${baseFeatName} - ${variantTitle}`],
+						};
 					}
+					recs.push({
+						name: `${n} Origin Feat`, parent: n, level: "1",
+						...(variantTitle ? {builderDisplayDescription: `${variantTitle} Spell List`} : {}),
+						payload: pay(payload),
+					});
 				}
 			}
 		}
@@ -1357,17 +1378,40 @@ function d20plus2024Charactermancer () {
 		return entry;
 	}
 
-	function bgEntry (bg, featByKey) {
+	function bgEntry (bg, featByKey, toolProfLists = {}) {
 		const tables = extractBgTables(bg);
 		const gold   = BG_GOLD[bg.name] ?? 15;
+
+		// Derive filter-Origin Feat from bg.feats (e.g. "magic initiate; cleric|xphb" → "Magic Initiate")
+		let originFeatName = null;
+		if (bg.feats?.length) {
+			const firstKey = Object.keys(bg.feats[0] || {})[0] || "";
+			if (firstKey && firstKey !== "choose") {
+				const [nameVariant] = firstKey.split("|");
+				const [baseName] = nameVariant.split(";").map(s => s.trim());
+				originFeatName = baseName.replace(/\b\w/g, c => c.toUpperCase()).trim();
+			}
+		}
+
+		// Derive filter-Ability Score from bg.ability pool (themed scores for XPHB backgrounds)
+		let abilityScoreFilter = null;
+		const ab0 = bg.ability?.[0];
+		if (ab0?.choose?.weighted) {
+			abilityScoreFilter = (ab0.choose.weighted.from || []).map(a => ABV[a] || a).join(", ");
+		} else if (ab0?.choose?.from) {
+			abilityScoreFilter = (ab0.choose.from || []).map(a => ABV[a] || a).join(", ");
+		}
+
 		const entry  = {
 			id: makeId(`bg:${bg.name}:${bg.source}`),
 			name: bg._displayName || bg.name,
 			properties: {
 				"Category": "Backgrounds",
 				"data-List": "false",
-				"filter-Feat": "No",
-				"data-datarecords": JSON.stringify(buildBgRecords(bg, featByKey)),
+				"filter-Feat": bg.feats?.length ? "Yes" : "No",
+				...(originFeatName   ? {"filter-Origin Feat":   originFeatName}   : {}),
+				...(abilityScoreFilter ? {"filter-Ability Score": abilityScoreFilter} : {}),
+				"data-datarecords": JSON.stringify(buildBgRecords(bg, featByKey, toolProfLists)),
 				"data-Starting Gold": gold,
 				...(tables.traits.length  ? {"data-Personality Traits": JSON.stringify(tables.traits)} : {}),
 				...(tables.bonds.length   ? {"data-Bonds":              JSON.stringify(tables.bonds)}  : {}),
@@ -1610,34 +1654,78 @@ function d20plus2024Charactermancer () {
 
 	function buildFeatRecords (feat) {
 		const recs = [];
+		const n    = feat.name;
 		const desc = renderDesc(feat.entries);
-		recs.push({
-			name: feat.name,
-			level: "1",
-			payload: pay({type: "Features", name: feat.name, description: desc}),
-		});
+		recs.push({name: n, level: "1", payload: pay({type: "Features", name: n, description: desc})});
 
-		// Ability score grants
+		// Detect multi-class spell list feats (Magic Initiate, Fey-Touched, etc.):
+		// additionalSpells has multiple entries, each for a different class.
+		// These need the native Roll20 hierarchical structure:
+		//   Spellcasting Ability Choice → INT/WIS/CHA options
+		//   Spell List Choice → Class options (Magic Initiate - Cleric, etc.)
+		//     each class option → Spell Choice cantrips + level spell + replace
+		// This matches native XPHB Magic Initiate exactly, allowing Feat Attach
+		// limitations.optionNames to pre-select a specific class.
+		const isMultiClass = (feat.additionalSpells?.length ?? 0) > 1;
+
+		// Ability score grants (fixed and choose)
+		let hasSpellcastingAbilityChoice = false;
 		for (const ab of (feat.ability || [])) {
 			if (ab.hidden) continue;
 			for (const [k, v] of Object.entries(ab)) {
 				if (k === "choose" || k === "hidden") continue;
 				if (typeof v === "number") {
 					recs.push({
-						name: `${ABV[k] || k} Score Bonus`, parent: feat.name, level: "1",
+						name: `${ABV[k] || k} Score Bonus`, parent: n, level: "1",
 						payload: pay({type: "Ability Score", ability: ABV[k] || k, calculation: "Modify", valueFormula: {flatValue: v}}),
 					});
 				}
 			}
 			if (ab.choose) {
 				const from = (ab.choose.from || []).map(a => ABV[a] || a);
-				const amount = ab.choose.amount || 1;
-				const count  = ab.choose.count  || 1;
-				if (from.length) {
+				if (!from.length) continue;
+				if (isMultiClass) {
+					// For multi-class spell feats the ability choice is the spellcasting
+					// ability (INT/WIS/CHA), not an ASI — generate Generic Choice + Spellcasting.
+					const choiceName = `${n} Spellcasting Ability Choice`;
+					recs.push({name: choiceName, parent: n,
+						payload: pay({type: "Generic Choice", category: "", replace: false, numOfChoices: 1})});
+					for (const abil of from) {
+						recs.push({
+							name: `${n} ${abil} Spellcasting DC`, parent: choiceName,
+							builderDisplayName: abil,
+							payload: pay({type: "Spellcasting", ability: abil, casterType: "other", name: n}),
+						});
+					}
+					hasSpellcastingAbilityChoice = true;
+				} else {
+					// Regular feat ASI choice
 					recs.push({
-						name: `${feat.name} Ability Score`, parent: feat.name, level: "1",
+						name: `${n} Ability Score`, parent: n, level: "1",
 						payload: pay({type: "Proficiency Choice", subtype: "Ability Score",
-							list: from, numOfChoices: count, proficiencyLevel: amount}),
+							list: from, numOfChoices: ab.choose.count || 1, proficiencyLevel: ab.choose.amount || 1}),
+					});
+				}
+			}
+		}
+
+		// Multi-class spell feats (Magic Initiate) store the spellcasting ability choice
+		// inside each additionalSpells entry as entry.ability.choose (e.g. ["int","wis","cha"]),
+		// NOT in feat.ability at the top level. Generate it from there if not already done.
+		if (isMultiClass && !hasSpellcastingAbilityChoice) {
+			const abilityFrom = feat.additionalSpells
+				?.find(e => e.ability?.choose?.length)
+				?.ability?.choose ?? [];
+			const abilities = abilityFrom.map(a => ABV[a] || a).filter(Boolean);
+			if (abilities.length) {
+				const choiceName = `${n} Spellcasting Ability Choice`;
+				recs.push({name: choiceName, parent: n,
+					payload: pay({type: "Generic Choice", category: "", replace: false, numOfChoices: 1})});
+				for (const abil of abilities) {
+					recs.push({
+						name: `${n} ${abil} Spellcasting DC`, parent: choiceName,
+						builderDisplayName: abil,
+						payload: pay({type: "Spellcasting", ability: abil, casterType: "other", name: n}),
 					});
 				}
 			}
@@ -1648,87 +1736,132 @@ function d20plus2024Charactermancer () {
 			for (const [skill, val] of Object.entries(grp)) {
 				if (!val || skill === "choose") continue;
 				const name = skill.charAt(0).toUpperCase() + skill.slice(1).replace(/([A-Z])/g, " $1");
-				recs.push({
-					name: `${name} Proficiency`, parent: feat.name, level: "1",
-					payload: pay({type: "Proficiency", category: "Skill", proficiency: name, proficiencyLevel: "Proficient"}),
-				});
+				recs.push({name: `${name} Proficiency`, parent: n, level: "1",
+					payload: pay({type: "Proficiency", category: "Skill", proficiency: name, proficiencyLevel: "Proficient"})});
 			}
 		}
 
-		// Defenses (Resistances, Vulnerabilities, and Immunities)
+		// Defenses
 		recs.push(...defenseRecords("Resistance", feat.resist));
 		recs.push(...defenseRecords("Vulnerability", feat.vulnerable));
 		recs.push(...defenseRecords("Immunity", feat.immune));
 		recs.push(...defenseRecords("Condition Immunity", feat.conditionImmune, 1, true));
 
-		// Spell choices from additionalSpells (Magic Initiate, Fey-Touched, etc.)
+		// Spell choices from additionalSpells
 		if (feat.additionalSpells?.length) {
-			// Collect choices across all variants into maps keyed by count.
-			// Multi-variant feats (Magic Initiate: 7 class variants) get fromClassList:[]
-			// so the user can pick from any class; single-class feats keep their restriction.
-			const cantripMap = new Map(); // choices → Set<class>
-			const spellMap   = new Map(); // "level:choices" → Set<class>
+			if (isMultiClass) {
+				// Multi-class spell list feat (Magic Initiate, Fey-Touched, etc.)
+				// Build the hierarchical structure matching native XPHB Magic Initiate.
+				// Resource for the free once-per-long-rest cast
+				recs.push({
+					name: `${n} Spell Resource`, parent: n,
+					payload: pay({type: "Resource", name: `${n} Level 1 Spell Free Cast`,
+						value: 1, maxValueFormula: {flatValue: 1}, recovery: "Long Rest", recoveryRate: "Full"}),
+				});
 
-			for (const entry of feat.additionalSpells) {
-				// Cantrips: known._ with choose containing level=0
-				for (const item of (entry.known?._ || [])) {
-					if (typeof item !== "object" || typeof item.choose !== "string") continue;
-					if (!item.choose.includes("level=0")) continue;
-					const count = item.count || 1;
-					const cm = item.choose.match(/class=([^|]+)/i);
-					if (!cantripMap.has(count)) cantripMap.set(count, new Set());
-					if (cm) cantripMap.get(count).add(cm[1].trim().toLowerCase());
-				}
-				// Leveled spells: innate._.daily.N[] with choose containing level=N
-				const daily = entry.innate?._?.daily || {};
-				for (const spells of Object.values(daily)) {
-					for (const item of (Array.isArray(spells) ? spells : [])) {
+				// Spell List Choice — one child per class (e.g. "Magic Initiate - Cleric")
+				const spellListChoiceName = `${n} Spell List Choice`;
+				recs.push({name: spellListChoiceName, parent: n,
+					payload: pay({type: "Generic Choice", category: "", replace: false, numOfChoices: 1})});
+
+				for (const entry of feat.additionalSpells) {
+					// Derive class name: "Cleric Spells" → "Cleric"
+					const rawName = entry.name || "";
+					const className = rawName.replace(/\s+spells?$/i, "").trim() ||
+					                  rawName.replace(/\b\w/g, c => c.toUpperCase());
+					if (!className) continue;
+					const optionName = `${n} - ${className}`;
+
+					// modifier record: renames the feat and updates its description
+					recs.push({
+						name: optionName, parent: spellListChoiceName,
+						builderDisplayName: className,
+						modify: n,
+						payload: pay({type: "modifier",
+							modifications: {description: desc},
+							concat: {name: ` - ${className}`}}),
+					});
+
+					// Cantrips
+					for (const item of (entry.known?._ || [])) {
 						if (typeof item !== "object" || typeof item.choose !== "string") continue;
-						const lm = item.choose.match(/level=(\d+)/i);
-						if (!lm || parseInt(lm[1]) < 1) continue;
-						const spellLvl = parseInt(lm[1]);
-						const count = item.count || 1;
-						const cm = item.choose.match(/class=([^|]+)/i);
-						const key = `${spellLvl}:${count}`;
-						if (!spellMap.has(key)) spellMap.set(key, new Set());
-						if (cm) spellMap.get(key).add(cm[1].trim().toLowerCase());
+						if (!item.choose.includes("level=0")) continue;
+						recs.push({
+							name: `${n} ${className} Cantrips`, parent: optionName,
+							builderDisplayName: `${n} Cantrips`,
+							payload: pay({type: "Spell Choice", spellLevel: 0, includeBelow: false,
+								choices: item.count || 2, fromClassList: [className], filter: [], list: [], replace: false}),
+						});
+					}
+
+					// Leveled spell + replace
+					const daily = entry.innate?._?.daily || {};
+					for (const spells of Object.values(daily)) {
+						for (const item of (Array.isArray(spells) ? spells : [])) {
+							if (typeof item !== "object" || typeof item.choose !== "string") continue;
+							const lm = item.choose.match(/level=(\d+)/i);
+							if (!lm || parseInt(lm[1]) < 1) continue;
+							const spellLvl = parseInt(lm[1]);
+							recs.push({
+								name: `${n} ${className} Spell Choice`, parent: optionName,
+								builderDisplayName: `${n} Level ${spellLvl} Spell`,
+								payload: pay({type: "Spell Choice", spellLevel: spellLvl, includeBelow: false,
+									choices: item.count || 1, fromClassList: [className],
+									filter: [], list: [], replace: false, alwaysPrepared: true}),
+							});
+							recs.push({
+								name: `${n} ${className} Replace Spell`, parent: optionName,
+								builderDisplayName: `Replace ${n} Spell`,
+								payload: pay({type: "Spell Choice", spellLevel: spellLvl, includeBelow: true,
+									choices: 1, fromClassList: [className],
+									filter: [], list: [], replace: true, alwaysPrepared: true}),
+							});
+						}
 					}
 				}
-			}
-
-			// Generate Spell Choice records for cantrips
-			for (const [count, classes] of cantripMap) {
-				const fromList = classes.size === 1 ? [[...classes][0]] : [];
-				recs.push({
-					name: `${feat.name} Cantrips`, level: "1",
-					builderDisplayName: `${feat.name} Cantrips`,
-					payload: pay({type: "Spell Choice", spellLevel: 0,
-						includeBelow: false, includeCantrips: true,
-						choices: count, fromClassList: fromList,
-						filter: [], list: [], replace: false}),
-				});
-			}
-
-			// Generate Spell Choice records for leveled spells + replace option
-			for (const [key, classes] of spellMap) {
-				const [spellLvl, count] = key.split(":").map(Number);
-				const fromList = classes.size === 1 ? [[...classes][0]] : [];
-				recs.push({
-					name: `${feat.name} Level ${spellLvl} Spell`, level: "1",
-					builderDisplayName: `${feat.name} Level ${spellLvl} Spell`,
-					payload: pay({type: "Spell Choice", spellLevel: spellLvl,
-						includeBelow: false, includeCantrips: false,
-						choices: count, fromClassList: fromList,
-						filter: [], list: [], replace: false}),
-				});
-				recs.push({
-					name: `${feat.name} Replace Spell`, level: "1",
-					builderDisplayName: `Replace ${feat.name} Spell`,
-					payload: pay({type: "Spell Choice", spellLevel: spellLvl,
-						includeBelow: false, includeCantrips: false,
-						choices: 1, fromClassList: fromList,
-						filter: [], list: [], replace: true}),
-				});
+			} else {
+				// Single-class or fixed-class feat (Fey-Touched with one class, etc.)
+				const cantripMap = new Map();
+				const spellMap   = new Map();
+				for (const entry of feat.additionalSpells) {
+					for (const item of (entry.known?._ || [])) {
+						if (typeof item !== "object" || typeof item.choose !== "string") continue;
+						if (!item.choose.includes("level=0")) continue;
+						const count = item.count || 1;
+						const cm = item.choose.match(/class=([^|]+)/i);
+						if (!cantripMap.has(count)) cantripMap.set(count, new Set());
+						if (cm) cantripMap.get(count).add(cm[1].trim().toLowerCase());
+					}
+					const daily = entry.innate?._?.daily || {};
+					for (const spells of Object.values(daily)) {
+						for (const item of (Array.isArray(spells) ? spells : [])) {
+							if (typeof item !== "object" || typeof item.choose !== "string") continue;
+							const lm = item.choose.match(/level=(\d+)/i);
+							if (!lm || parseInt(lm[1]) < 1) continue;
+							const count = item.count || 1;
+							const cm = item.choose.match(/class=([^|]+)/i);
+							const key = `${parseInt(lm[1])}:${count}`;
+							if (!spellMap.has(key)) spellMap.set(key, new Set());
+							if (cm) spellMap.get(key).add(cm[1].trim().toLowerCase());
+						}
+					}
+				}
+				for (const [count, classes] of cantripMap) {
+					const fromList = classes.size === 1 ? [[...classes][0]] : [];
+					recs.push({name: `${n} Cantrips`, level: "1", builderDisplayName: `${n} Cantrips`,
+						payload: pay({type: "Spell Choice", spellLevel: 0, includeBelow: false, includeCantrips: true,
+							choices: count, fromClassList: fromList, filter: [], list: [], replace: false})});
+				}
+				for (const [key, classes] of spellMap) {
+					const [spellLvl, count] = key.split(":").map(Number);
+					const fromList = classes.size === 1 ? [[...classes][0]] : [];
+					recs.push({name: `${n} Level ${spellLvl} Spell`, level: "1", builderDisplayName: `${n} Level ${spellLvl} Spell`,
+						payload: pay({type: "Spell Choice", spellLevel: spellLvl, includeBelow: false, includeCantrips: false,
+							choices: count, fromClassList: fromList, filter: [], list: [], replace: false})});
+					recs.push({name: `${n} Replace Spell`, level: "1", builderDisplayName: `Replace ${n} Spell`,
+						payload: pay({type: "Spell Choice", spellLevel: spellLvl, includeBelow: false, includeCantrips: false,
+							choices: 1, fromClassList: fromList, filter: [], list: [], replace: true})});
+				}
 			}
 		}
 
@@ -2173,13 +2306,20 @@ function d20plus2024Charactermancer () {
 
 		const body = typeof (args[1] || {}).body === "string" ? args[1].body : "";
 
-		// page(id:...) — return from cache immediately for our synthetic entries
+		// page(id:...) — return from cache immediately for our synthetic entries.
+		// Also captures the build system version when a class or species is selected.
 		if (body.includes("page(id:")) {
 			const idMatch = body.match(/page\(id:[^)]*?([a-f0-9]{24})/);
 
 			if (idMatch) {
 				const cached = _pageCache.get(idMatch[1]);
 				if (cached) {
+					// Detect system version from the selected entry's category + book version
+					const cat = cached.properties?.Category;
+					if ((cat === "Classes" || cat === "Races") && !_buildVersion) {
+						_buildVersion = cached.book?.systemVersion === "2024" ? "2024" : "2014";
+						console.log(`[B20] Build version set to ${_buildVersion} from ${cat}: ${cached.name}`);
+					}
 					return new Response(
 						JSON.stringify({data: {ruleSystem: {page: cached}}, extensions: {}}),
 						{status: 200, headers: {"Content-Type": "application/json"}},
@@ -2341,24 +2481,62 @@ function d20plus2024Charactermancer () {
 				}
 
 				if (isFeats) {
-					const entries = inject(await getFeats(), featEntry);
+					// Deduplicate feats by name, preferring the version that matches the
+					// current character build (2024 → XPHB first; 2014 → PHB first).
+					// This ensures "Magic Initiate" is a single injected entry without
+					// the "(XPHB)"/"(PHB)" rename suffix, so Feat Attach can find it by name.
+					const allFeats = await getFeats();
+					const is2024 = _buildVersion === "2024" || _buildVersion === null; // default 2024 if unknown
+					const SOURCE_PREF_FEATS = is2024
+						? ["XPHB","PHB","TCE","XGE","SCAG","DMG"]
+						: ["PHB","XPHB","TCE","XGE","SCAG","DMG"];
+					const featsByName = new Map();
+					for (const f of allFeats) {
+						const key = f.name.toLowerCase();
+						if (!featsByName.has(key)) { featsByName.set(key, f); continue; }
+						const curPref = SOURCE_PREF_FEATS.indexOf(featsByName.get(key).source);
+						const newPref = SOURCE_PREF_FEATS.indexOf(f.source);
+						if (newPref !== -1 && (curPref === -1 || newPref < curPref)) featsByName.set(key, f);
+					}
+					const nativeBefore = pages.length;
+					const entries = inject([...featsByName.values()], featEntry);
 					pages.push(...entries);
-					d20plus.ut.log(`[Charactermancer] Injected ${entries.length} feats (${pages.length - entries.length} from server)`);
+					d20plus.ut.log(`[Charactermancer] Injected ${entries.length} feats (${nativeBefore} from server)`);
+					console.log(`[B20 Feats] ${nativeBefore} native + ${entries.length} injected = ${pages.length} total`);
+					console.log("[B20 Feats] Native entries:", pages.slice(0, nativeBefore).map(p => `${p.name} (${p.book?.name || "?"})`));
+					const miEntry = entries.find(e => e.name === "Magic Initiate");
+					if (miEntry) console.log("[B20 Feats] Magic Initiate record structure:", JSON.parse(miEntry.properties["data-datarecords"]).map(r => `${r.name} → parent:${r.parent||"(root)"}`));
 				}
 
 				if (isRaces) {
 					const entries = inject(await getRaces(), raceEntry);
 					pages.push(...entries);
 					d20plus.ut.log(`[Charactermancer] Injected ${entries.length} races/subraces (${pages.length - entries.length} from server)`);
+					console.log(`[B20 Races] ${pages.length - entries.length} native + ${entries.length} injected = ${pages.length} total`);
 				}
 				if (isBgs) {
-					// Pre-load feat data so buildBgRecords can embed spell choices
-					// for origin feats (e.g. Acolyte → Magic Initiate: Cleric).
-					const allFeats = await getFeats();
+					// Pre-load feat data and tool proficiency lists in parallel.
+					// toolProfs is passed into buildBgRecords so "any*" tool choices use explicit
+					// name arrays (like native Dwarf) rather than "Lists:..." references, which
+					// cause a grayed-out dropdown when Roll20 can't serve the list.
+					const [allFeats, toolProfs] = await Promise.all([getFeats(), getToolProfLists()]);
 					const featByKey = new Map(allFeats.map(f => [`${f.name.toLowerCase()}|${(f.source||"").toLowerCase()}`, f]));
-					const entries = inject(await getBackgrounds(), bg => bgEntry(bg, featByKey));
+					const entries = inject(await getBackgrounds(), bg => bgEntry(bg, featByKey, toolProfs));
 					pages.push(...entries);
 					d20plus.ut.log(`[Charactermancer] Injected ${entries.length} backgrounds (${pages.length - entries.length} from server)`);
+					console.log(`[B20 Backgrounds] ${pages.length - entries.length} native + ${entries.length} injected = ${pages.length} total`);
+					// Log any injected XPHB backgrounds with their origin feat records so we can verify
+					const xphbBgs = entries.filter(e => e.book?.systemVersion === "2024");
+					if (xphbBgs.length) {
+						console.log("[B20 Backgrounds] XPHB injected sample:", xphbBgs.slice(0,3).map(e => ({
+							name: e.name,
+							filterFeat: e.properties["filter-Feat"],
+							filterOriginFeat: e.properties["filter-Origin Feat"],
+							filterAbilityScore: e.properties["filter-Ability Score"],
+							originFeatRecord: JSON.parse(e.properties["data-datarecords"]).find(r => r.name?.includes("Origin Feat")),
+							abilityScoreRecords: JSON.parse(e.properties["data-datarecords"]).filter(r => r.payload?.includes("Ability Score Choice")),
+						})));
+					}
 				}
 
 				if (isSpells) {
@@ -2389,9 +2567,11 @@ function d20plus2024Charactermancer () {
 								if (filterLevel < 0) return true;
 								return filterLevelOp === "eq" ? spell.level === filterLevel : spell.level <= filterLevel;
 							});
-							// Deduplicate by spell name, preferring newer sources (XPHB > PHB etc.)
-							// so users see one clean "Fireball" entry rather than "Fireball (PHB)" + "Fireball (XPHB)".
-							const SOURCE_PREF = ["XPHB","PHB","TCE","SCAG","XGE","DMG","MM"];
+							// Deduplicate by spell name, preferring the version that matches
+							// the active character build (XPHB for 2024, PHB for 2014).
+							const SOURCE_PREF = (_buildVersion === "2014")
+								? ["PHB","XPHB","TCE","SCAG","XGE","DMG","MM"]
+								: ["XPHB","PHB","TCE","SCAG","XGE","DMG","MM"];
 							const byName = new Map();
 							for (const spell of filtered) {
 								const key = spell.name.toLowerCase();
@@ -2456,12 +2636,13 @@ function d20plus2024Charactermancer () {
 				}
 			}
 
-			// Lists: inject standard weapon list definitions (used by Charactermancer to build Items filter)
-			// The GraphQL body uses unquoted keys so we match by checking if the list name literal appears.
+			// Lists: inject standard weapon list definitions and proficiency lists.
 			if (isLists) {
 				const listPages = data?.data?.ruleSystem?.category?.filterAndSortPages;
 				if (Array.isArray(listPages)) {
 					const existing_lists = new Set(listPages.map(p => p.name));
+
+					// Standard item lists (Simple Weapons, Martial Weapons, etc.)
 					for (const [listName, filter] of Object.entries(STANDARD_LISTS)) {
 						if (!body.includes(listName)) continue;
 						if (existing_lists.has(listName)) continue;
@@ -2469,16 +2650,47 @@ function d20plus2024Charactermancer () {
 						listPages.push({
 							id: makeId(`list:${listName}`),
 							name: listName,
-							properties: {
-								"Category": "Lists",
-								"data-filter": JSON.stringify(filter),
-								"data-listCategory": "Items",
-							},
+							properties: {"Category": "Lists", "data-filter": JSON.stringify(filter), "data-listCategory": "Items"},
 							children: [],
 							publisher: {name: "5etools", logoUrl: ""},
 							book: {name: "5etools SRD", itemId: null, systemVersion: "", isOwned: true},
 						});
 						d20plus.ut.log(`[Charactermancer] Injected list definition: ${listName}`);
+					}
+
+					// Proficiency lists (Artisan's Tools, Gaming Sets, Musical Instruments)
+					// These are queried when Proficiency Choice records reference "Lists:X Proficiency".
+					// Roll20 may not have these for users without the relevant books, so we inject
+					// them from 5etools item data (AT/GS/INS item types).
+					const PROF_LIST_NAMES = [
+						"Artisan's Tools Proficiency",
+						"Gaming Sets Proficiency",
+						"Musical Instruments Proficiency",
+					];
+					const neededLists = PROF_LIST_NAMES.filter(n => body.includes(n) && !existing_lists.has(n));
+					if (neededLists.length) {
+						const toolProfs = await getToolProfLists();
+						for (const listName of neededLists) {
+							const toolNames = toolProfs[listName] || [];
+							if (!toolNames.length) continue;
+							existing_lists.add(listName);
+							listPages.push({
+								id: makeId(`list:${listName}`),
+								name: listName,
+								properties: {"Category": "Lists"},
+								children: toolNames.map(name => ({
+									id: makeId(`profitem:${listName}:${name}`),
+									name,
+									properties: {"Category": "Lists", "Type": "Tool"},
+									children: [],
+									publisher: {name: "5etools", logoUrl: ""},
+									book: {name: "5etools SRD", itemId: null, systemVersion: "", isOwned: true},
+								})),
+								publisher: {name: "5etools", logoUrl: ""},
+								book: {name: "5etools SRD", itemId: null, systemVersion: "", isOwned: true},
+							});
+							d20plus.ut.log(`[Charactermancer] Injected proficiency list: ${listName} (${toolNames.length} items)`);
+						}
 					}
 				}
 			}
