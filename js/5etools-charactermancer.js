@@ -80,13 +80,17 @@ function d20plus2024Charactermancer () {
 
 	// ── Data cache ───────────────────────────────────────────────────────────
 
-	let _clsP = null, _raceP = null, _bgP = null, _subclsP = null, _featP = null, _subraceP = null, _itemsP = null, _packsP = null, _gearP = null;
+	let _clsP = null, _raceP = null, _bgP = null, _subclsP = null, _featP = null, _subraceP = null, _itemsP = null, _packsP = null, _gearP = null, _spellsP = null;
 	// Cache our synthesised entries by id so page(id:...) queries can be answered
 	const _pageCache = new Map();
 
 	function getClasses () {
 		if (!_clsP) _clsP = DataLoader.pCacheAndGetAllSite("class").catch(() => []);
 		return _clsP;
+	}
+	function getSpells () {
+		if (!_spellsP) _spellsP = DataLoader.pCacheAndGetAllSite("spell").catch(() => []);
+		return _spellsP;
 	}
 	function getRaces () {
 		if (!_raceP) _raceP = DataLoader.pCacheAndGetAllSite("race")
@@ -679,7 +683,7 @@ function d20plus2024Charactermancer () {
 		return recs;
 	}
 
-	// ── Build data-datarecords for a class ────────────────────────────────────
+// ── Build data-datarecords for a class ────────────────────────────────────
 
 	function buildClassRecords (cls) {
 		const recs = [];
@@ -799,15 +803,80 @@ function d20plus2024Charactermancer () {
 						recs.push(...spellSlotRecords(n, scParent, spellTable, isPact));
 					}
 
-					// Initial spell choices for known-casters
-					if (!isPooled) {
+					// Cantrip selection (any caster with cantrips at level 1)
+					const cantripCount = (cls.cantripProgression || [])[0] || 0;
+					if (cantripCount > 0) {
 						recs.push({
-							name: `${n} Level 1 Spells`, parent: scParent, level: String(lvl),
-							builderDisplayName: `${n} Starting Spells`,
-							payload: pay({type: "Spell Choice", spellLevel: 1, includeBelow: true, choices: 2,
-								fromClassList: [n], filter: [], list: [], replace: false}),
+							name: `${n} Cantrips`, parent: scParent, level: String(lvl),
+							builderDisplayName: `${n} Cantrips`,
+							payload: pay({type: "Spell Choice", spellLevel: 0, includeBelow: false,
+								choices: cantripCount, fromClassList: [n], filter: [], list: [], replace: false}),
 						});
 					}
+
+					// Per-level spell choices for known-spell casters.
+					// Add a Spell Choice at each level where new spells are gained,
+					// using the max available spell slot level at that character level.
+					const spellProgression = cls.spellsKnownProgression || cls.preparedSpellsProgression || [];
+					if (spellProgression.length > 0) {
+						// One record per character level where spells are gained — matching
+						// Roll20 native behaviour exactly. Native shows separate level sections
+						// each with the DELTA at that level (e.g. "Sorcerer Level 1 Spells: 0/2"
+						// at level 1, then another "Sorcerer Level 1 Spells: 0/2" at level 2).
+						let prevKnown = 0;
+						for (let charLvl = 1; charLvl <= spellProgression.length; charLvl++) {
+							const knownNow = spellProgression[charLvl - 1] || 0;
+							const newSpells = knownNow - prevKnown;
+							prevKnown = knownNow;
+							if (newSpells <= 0) continue;
+							const row = spellTable ? (spellTable[charLvl - 1] || []) : [];
+							let maxSlot = 1;
+							for (let i = row.length - 1; i >= 0; i--) { if (row[i] > 0) { maxSlot = i + 1; break; } }
+							recs.push({
+								name: `${n} Level ${maxSlot} Spell Choice ${charLvl}`,
+								parent: scParent, level: String(charLvl),
+								builderDisplayName: `${n} Level ${maxSlot} Spells`,
+								payload: pay({type: "Spell Choice", spellLevel: maxSlot,
+									includeBelow: maxSlot > 1, includeCantrips: false,
+									choices: newSpells, fromClassList: [n], filter: [], list: [], replace: false}),
+							});
+						}
+
+						// Replace Spell: at every level from 2+ for known-spell casters.
+						// PHB: spellsKnownProgression (no preparedSpellsChange)
+						// XPHB: preparedSpellsChange === "level"
+						const maxCharLvl = spellProgression.length;
+						for (let charLvl = 2; charLvl <= maxCharLvl; charLvl++) {
+							if (!(spellProgression[charLvl - 1] > 0)) continue;
+							const row = spellTable ? (spellTable[charLvl - 1] || []) : [];
+							let maxSlot = 1;
+							for (let i = row.length - 1; i >= 0; i--) { if (row[i] > 0) { maxSlot = i + 1; break; } }
+							recs.push({
+								name: `${n} Replace Spell ${charLvl}`,
+								parent: scParent, level: String(charLvl),
+								builderDisplayName: `Replace ${n} Spell`,
+								payload: pay({type: "Spell Choice", spellLevel: maxSlot,
+									includeBelow: true, includeCantrips: false,
+									choices: 1, fromClassList: [n], filter: [], list: [], replace: true}),
+							});
+						}
+
+						// Replace Cantrip: only for classes with preparedSpellsChange:"level"
+						// (XPHB 2024 style — PHB 2014 casters don't replace cantrips).
+						if (cls.preparedSpellsChange === "level" && cantripCount > 0) {
+							for (let charLvl = 2; charLvl <= maxCharLvl; charLvl++) {
+								recs.push({
+									name: `${n} Replace Cantrip ${charLvl}`,
+									parent: scParent, level: String(charLvl),
+									builderDisplayName: `Replace ${n} Cantrip`,
+									payload: pay({type: "Spell Choice", spellLevel: 0,
+										includeBelow: false, includeCantrips: true,
+										choices: 1, fromClassList: [n], filter: [], list: [], replace: true}),
+								});
+							}
+						}
+					}
+
 					continue;
 				}
 
@@ -1002,7 +1071,7 @@ function d20plus2024Charactermancer () {
 		return result;
 	}
 
-	function buildBgRecords (bg) {
+	function buildBgRecords (bg, featByKey) {
 		const recs = [];
 		const n = bg.name;
 
@@ -1158,18 +1227,78 @@ function d20plus2024Charactermancer () {
 				payload: pay({type: "Features", name: "Ability Score Increase", description: abiDesc})});
 		}
 
-		// 2024 (XPHB) origin feat
+		// 2024 (XPHB) origin feat — embed the feat's spell choices directly
 		if (bg.feats) {
 			for (const featGroup of bg.feats) {
 				for (const featKey of Object.keys(featGroup)) {
 					if (!featKey || featKey === "choose") continue;
-					const featDisplay = featKey.split("|")[0].replace(/;/g, ":").replace(/\b\w/g, c => c.toUpperCase()).trim();
+					// featKey format: "magic initiate; cleric|xphb"
+					const [nameVariant, src = ""] = featKey.split("|");
+					const [baseName, variant = ""] = nameVariant.split(";").map(s => s.trim());
+					const featDisplay = (baseName + (variant ? ": " + variant : ""))
+						.replace(/\b\w/g, c => c.toUpperCase()).trim();
+					const featParent = `${n} Origin Feat`;
 					recs.push({
-						name: `${n} Origin Feat`, parent: n, level: "1",
+						name: featParent, parent: n, level: "1",
 						builderDisplayName: `Origin Feat: ${featDisplay}`,
 						payload: pay({type: "Features", name: `Origin Feat: ${featDisplay}`,
 							description: `This background grants the ${featDisplay} feat.`}),
 					});
+
+					// Look up the feat and embed its spell choices
+					const feat = featByKey?.get(`${baseName.toLowerCase()}|${src.toLowerCase()}`);
+					if (feat?.additionalSpells?.length) {
+						// Find matching variant entry (e.g. "Cleric Spells" for variant "cleric")
+						const variantLc = variant.toLowerCase();
+						const entries = variantLc
+							? feat.additionalSpells.filter(e => e.name?.toLowerCase().startsWith(variantLc))
+							: feat.additionalSpells;
+						for (const entry of (entries.length ? entries : feat.additionalSpells.slice(0, 1))) {
+							// Cantrips
+							for (const item of (entry.known?._ || [])) {
+								if (typeof item !== "object" || typeof item.choose !== "string") continue;
+								if (!item.choose.includes("level=0")) continue;
+								const cm = item.choose.match(/class=([^|]+)/i);
+								recs.push({
+									name: `${featParent} Cantrips`, parent: featParent, level: "1",
+									builderDisplayName: `${featDisplay} Cantrips`,
+									payload: pay({type: "Spell Choice", spellLevel: 0,
+										includeBelow: false, includeCantrips: true,
+										choices: item.count || 1,
+										fromClassList: cm ? [cm[1].trim()] : [],
+										filter: [], list: [], replace: false}),
+								});
+							}
+							// Leveled spells
+							const daily = entry.innate?._?.daily || {};
+							for (const spells of Object.values(daily)) {
+								for (const item of (Array.isArray(spells) ? spells : [])) {
+									if (typeof item !== "object" || typeof item.choose !== "string") continue;
+									const lm = item.choose.match(/level=(\d+)/i);
+									if (!lm || parseInt(lm[1]) < 1) continue;
+									const spellLvl = parseInt(lm[1]);
+									const cm = item.choose.match(/class=([^|]+)/i);
+									const fromList = cm ? [cm[1].trim()] : [];
+									recs.push({
+										name: `${featParent} Level ${spellLvl} Spell`, parent: featParent, level: "1",
+										builderDisplayName: `${featDisplay} Level ${spellLvl} Spell`,
+										payload: pay({type: "Spell Choice", spellLevel: spellLvl,
+											includeBelow: false, includeCantrips: false,
+											choices: item.count || 1, fromClassList: fromList,
+											filter: [], list: [], replace: false}),
+									});
+									recs.push({
+										name: `${featParent} Replace Spell`, parent: featParent, level: "1",
+										builderDisplayName: `Replace ${featDisplay} Spell`,
+										payload: pay({type: "Spell Choice", spellLevel: spellLvl,
+											includeBelow: false, includeCantrips: false,
+											choices: 1, fromClassList: fromList,
+											filter: [], list: [], replace: true}),
+									});
+								}
+							}
+						}
+					}
 				}
 			}
 		}
@@ -1228,7 +1357,7 @@ function d20plus2024Charactermancer () {
 		return entry;
 	}
 
-	function bgEntry (bg) {
+	function bgEntry (bg, featByKey) {
 		const tables = extractBgTables(bg);
 		const gold   = BG_GOLD[bg.name] ?? 15;
 		const entry  = {
@@ -1238,7 +1367,7 @@ function d20plus2024Charactermancer () {
 				"Category": "Backgrounds",
 				"data-List": "false",
 				"filter-Feat": "No",
-				"data-datarecords": JSON.stringify(buildBgRecords(bg)),
+				"data-datarecords": JSON.stringify(buildBgRecords(bg, featByKey)),
 				"data-Starting Gold": gold,
 				...(tables.traits.length  ? {"data-Personality Traits": JSON.stringify(tables.traits)} : {}),
 				...(tables.bonds.length   ? {"data-Bonds":              JSON.stringify(tables.bonds)}  : {}),
@@ -1254,6 +1383,211 @@ function d20plus2024Charactermancer () {
 			book: book(bg.source),
 		};
 		_pageCache.set(entry.id, entry);
+		return entry;
+	}
+
+	// ── Spell entry ──────────────────────────────────────────────────────────
+
+	function buildSpellBuilderRecords (spell) {
+		const sp = d20plus.spellParsers;
+		const n  = spell.name;
+		const recs = [];
+
+		// Components object
+		const comp = spell.components || {};
+		const components = {};
+		if (comp.v) components.verbal = true;
+		if (comp.s) components.somatic = true;
+		if (comp.m) {
+			components.material = true;
+			components.materialDescription = typeof comp.m === "string" ? comp.m : (comp.m.text || "");
+		}
+
+		// Casting time and duration
+		const castingTimeBase = sp.parseCastingTime(spell.time);
+		const isRitual = !!(spell.meta && spell.meta.ritual);
+		const castingTime = isRitual ? `${castingTimeBase} or Ritual` : castingTimeBase;
+		const duration = sp.parseDuration(spell.duration);
+
+		// Concentration
+		const isConcentration = (spell.duration || []).some(d => d.concentration);
+
+		// AoE
+		const aoeShape = spell.areaTags && spell.areaTags.length ? sp.areaTagToShape(spell.areaTags[0]) : "";
+		const aoeSize  = sp.parseAoeSize(spell.entries);
+		const aoe = (aoeShape && aoeSize) ? {shape: aoeShape, size: aoeSize} : null;
+
+		// Description — use renderDesc which strips HTML and 5etools tags
+		const description = renderDesc(spell.entries || []).trim();
+
+		// Upcast text
+		let upcastText = "";
+		if (spell.entriesHigherLevel?.length) {
+			upcastText = renderDesc(spell.entriesHigherLevel[0].entries || []).trim();
+		}
+
+		// Main spell record
+		recs.push({
+			name: n, level: String(spell.level),
+			payload: pay({
+				type: "Spell", name: n, description,
+				...(upcastText ? {upcastText} : {}),
+				level: spell.level,
+				school: Parser.spSchoolAbvToFull(spell.school),
+				castingTime, range: Parser.spRangeToFull(spell.range),
+				duration,
+				...(isConcentration ? {concentration: true} : {}),
+				...(isRitual ? {ritual: true} : {}),
+				components,
+				...(aoe ? {aoe} : {}),
+			}),
+		});
+
+		// Determine attack chain
+		const hasSave     = spell.savingThrow && spell.savingThrow.length;
+		const hasSpellAtk = spell.spellAttack && spell.spellAttack.length;
+		const hasDamage   = spell.damageInflict && spell.damageInflict.length;
+		const isCantrip   = spell.level === 0;
+
+		if (hasDamage || hasSave || hasSpellAtk) {
+			const atkName   = `${n} Attack`;
+			const dmgParsed = sp.parseDamage(spell.entries);
+
+			// Attack record
+			let attackPayload;
+			if (hasSave) {
+				const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+				const saveAbility = cap(spell.savingThrow[0]);
+				attackPayload = {
+					type: "Attack", name: n,
+					save: {saveAbility, onFail: dmgParsed ? `${dmgParsed.diceCount}${dmgParsed.diceSize} ${cap(spell.damageInflict[0])} damage.` : "Take damage.", onSucceed: "Half damage."},
+					...(aoe ? {aoe} : {}),
+				};
+			} else {
+				const atkType = spell.spellAttack && spell.spellAttack[0] === "M" ? "Melee Spell Attack" : "Spell Attack";
+				attackPayload = {
+					type: "Attack", name: n,
+					attack: {type: atkType},
+					range: Parser.spRangeToFull(spell.range),
+					...(aoe ? {aoe} : {}),
+				};
+			}
+			recs.push({name: atkName, parent: n, payload: pay(attackPayload)});
+
+			// Damage record(s)
+			if (dmgParsed) {
+				const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+				const dmgName = `${n} Damage`;
+				const dmgPayload = {
+					type: "Damage", ability: "none",
+					damageType: cap(spell.damageInflict[0]),
+					diceCount: dmgParsed.diceCount, diceSize: dmgParsed.diceSize,
+					...(dmgParsed.flatBonus ? {_bonus: dmgParsed.flatBonus} : {}),
+				};
+				recs.push({name: dmgName, parent: atkName, payload: pay(dmgPayload)});
+
+				// Second damage type (e.g. multi-damage spells)
+				if (spell.damageInflict.length > 1) {
+					const dmgParsed2 = sp.parseDamage(spell.entries.filter((e, i) => i > 0));
+					if (dmgParsed2) {
+						const dmgName2 = `${n} Damage 2`;
+						recs.push({name: dmgName2, parent: atkName, payload: pay({
+							type: "Damage", ability: "none",
+							damageType: cap(spell.damageInflict[1]),
+							diceCount: dmgParsed2.diceCount, diceSize: dmgParsed2.diceSize,
+						})});
+					}
+				}
+
+				// Upcasting
+				const upcast = sp.parseUpcast(spell.entriesHigherLevel);
+				if (upcast) {
+					const mode = upcast.stepLevels > 1 ? `Per ${upcast.stepLevels} Spell Levels` : "Per X Spell Level";
+					recs.push({name: `${n} Damage Upcast`, parent: dmgName, payload: pay({
+						type: "Upcasting", mode, startingLevel: upcast.startingLevel,
+						level: upcast.stepLevels || 1, target: "$.diceCount",
+						value: upcast.value, changeMode: "Add",
+					})});
+				}
+
+				// Cantrip scaling
+				if (isCantrip) {
+					const levels = sp.parseCantripLevels(spell);
+					for (const lvl of levels) {
+						recs.push({name: `${n} Cantrip ${lvl}`, parent: dmgName, payload: pay({
+							type: "Upcasting", mode: "Cantrip Level", startingLevel: lvl,
+							level: 1, target: "$.diceCount", value: 1, changeMode: "Add",
+						})});
+					}
+				}
+			}
+		}
+
+		// Healing spells
+		const isHeal = !hasDamage && (spell.miscTags || []).includes("HL");
+		if (isHeal) {
+			const healDice = sp.parseHealDice(spell.entries);
+			if (healDice) {
+				recs.push({name: `${n} Healing`, parent: n, payload: pay({
+					type: "Healing", ability: "none", isTemp: false,
+					diceCount: healDice.diceCount, diceSize: healDice.diceSize,
+					...(healDice.bonus ? {_bonus: healDice.bonus} : {}),
+				})});
+				const healUp = sp.parseHealUpcast(spell.entriesHigherLevel);
+				if (healUp) {
+					recs.push({name: `${n} Healing Upcast`, parent: `${n} Healing`, payload: pay({
+						type: "Upcasting", mode: "Per X Spell Level", startingLevel: healUp.startingLevel,
+						level: healUp.stepLevels || 1,
+						target: healUp.targetBonus ? "$._bonus" : "$.diceCount",
+						value: healUp.value, changeMode: "Add",
+					})});
+				}
+			}
+		}
+
+		return recs;
+	}
+
+	function spellEntry (spell) {
+		if (!d20plus.spellParsers) return null;
+		const cap  = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+		const classList = ((spell.classes || {}).fromClassList || []).map(c => cap(c.name));
+		const compObj   = spell.components || {};
+		const compParts = [];
+		if (compObj.v) compParts.push("V");
+		if (compObj.s) compParts.push("S");
+		if (compObj.m) compParts.push("M");
+		const compStr = compParts.join(" ");
+
+		const isRitual    = !!(spell.meta && spell.meta.ritual);
+		const isConc      = (spell.duration || []).some(d => d.concentration);
+		const castingBase = d20plus.spellParsers.parseCastingTime(spell.time);
+		const castingTime = isRitual ? `${castingBase} or Ritual` : castingBase;
+
+		const id = makeId(`spell:${spell.name}:${spell.source}`);
+		const records = buildSpellBuilderRecords(spell);
+		const entry = {
+			id,
+			name: spell._displayName || spell.name,
+			properties: {
+				"Category":             "Spells",
+				"Level":                spell.level,
+				"School":               Parser.spSchoolAbvToFull(spell.school),
+				"Classes":              classList.join(", "),
+				"Duration":             d20plus.spellParsers.parseDuration(spell.duration),
+				"data-List":            "false",
+				"Components":           compStr,
+				"Casting Time":         castingTime,
+				"filter-Level":         spell.level,
+				"filter-Ritual":        isRitual ? "Yes" : "No",
+				"filter-Concentration": isConc   ? "Yes" : "No",
+				"data-datarecords":     JSON.stringify(records),
+			},
+			children:  [],
+			publisher: {name: "5etools", logoUrl: ""},
+			book:      book(spell.source),
+		};
+		_pageCache.set(id, entry);
 		return entry;
 	}
 
@@ -1326,6 +1660,77 @@ function d20plus2024Charactermancer () {
 		recs.push(...defenseRecords("Vulnerability", feat.vulnerable));
 		recs.push(...defenseRecords("Immunity", feat.immune));
 		recs.push(...defenseRecords("Condition Immunity", feat.conditionImmune, 1, true));
+
+		// Spell choices from additionalSpells (Magic Initiate, Fey-Touched, etc.)
+		if (feat.additionalSpells?.length) {
+			// Collect choices across all variants into maps keyed by count.
+			// Multi-variant feats (Magic Initiate: 7 class variants) get fromClassList:[]
+			// so the user can pick from any class; single-class feats keep their restriction.
+			const cantripMap = new Map(); // choices → Set<class>
+			const spellMap   = new Map(); // "level:choices" → Set<class>
+
+			for (const entry of feat.additionalSpells) {
+				// Cantrips: known._ with choose containing level=0
+				for (const item of (entry.known?._ || [])) {
+					if (typeof item !== "object" || typeof item.choose !== "string") continue;
+					if (!item.choose.includes("level=0")) continue;
+					const count = item.count || 1;
+					const cm = item.choose.match(/class=([^|]+)/i);
+					if (!cantripMap.has(count)) cantripMap.set(count, new Set());
+					if (cm) cantripMap.get(count).add(cm[1].trim().toLowerCase());
+				}
+				// Leveled spells: innate._.daily.N[] with choose containing level=N
+				const daily = entry.innate?._?.daily || {};
+				for (const spells of Object.values(daily)) {
+					for (const item of (Array.isArray(spells) ? spells : [])) {
+						if (typeof item !== "object" || typeof item.choose !== "string") continue;
+						const lm = item.choose.match(/level=(\d+)/i);
+						if (!lm || parseInt(lm[1]) < 1) continue;
+						const spellLvl = parseInt(lm[1]);
+						const count = item.count || 1;
+						const cm = item.choose.match(/class=([^|]+)/i);
+						const key = `${spellLvl}:${count}`;
+						if (!spellMap.has(key)) spellMap.set(key, new Set());
+						if (cm) spellMap.get(key).add(cm[1].trim().toLowerCase());
+					}
+				}
+			}
+
+			// Generate Spell Choice records for cantrips
+			for (const [count, classes] of cantripMap) {
+				const fromList = classes.size === 1 ? [[...classes][0]] : [];
+				recs.push({
+					name: `${feat.name} Cantrips`, level: "1",
+					builderDisplayName: `${feat.name} Cantrips`,
+					payload: pay({type: "Spell Choice", spellLevel: 0,
+						includeBelow: false, includeCantrips: true,
+						choices: count, fromClassList: fromList,
+						filter: [], list: [], replace: false}),
+				});
+			}
+
+			// Generate Spell Choice records for leveled spells + replace option
+			for (const [key, classes] of spellMap) {
+				const [spellLvl, count] = key.split(":").map(Number);
+				const fromList = classes.size === 1 ? [[...classes][0]] : [];
+				recs.push({
+					name: `${feat.name} Level ${spellLvl} Spell`, level: "1",
+					builderDisplayName: `${feat.name} Level ${spellLvl} Spell`,
+					payload: pay({type: "Spell Choice", spellLevel: spellLvl,
+						includeBelow: false, includeCantrips: false,
+						choices: count, fromClassList: fromList,
+						filter: [], list: [], replace: false}),
+				});
+				recs.push({
+					name: `${feat.name} Replace Spell`, level: "1",
+					builderDisplayName: `Replace ${feat.name} Spell`,
+					payload: pay({type: "Spell Choice", spellLevel: spellLvl,
+						includeBelow: false, includeCantrips: false,
+						choices: 1, fromClassList: fromList,
+						filter: [], list: [], replace: true}),
+				});
+			}
+		}
 
 		return recs;
 	}
@@ -1771,7 +2176,7 @@ function d20plus2024Charactermancer () {
 		// page(id:...) — return from cache immediately for our synthetic entries
 		if (body.includes("page(id:")) {
 			const idMatch = body.match(/page\(id:[^)]*?([a-f0-9]{24})/);
-			
+
 			if (idMatch) {
 				const cached = _pageCache.get(idMatch[1]);
 				if (cached) {
@@ -1788,15 +2193,26 @@ function d20plus2024Charactermancer () {
 		// Order matters: more-specific substring checks first
 		const isSubraces   = body.includes("Subraces");
 		const isSubclasses = body.includes("Subclasses");
-		const isClasses    = !isSubclasses && body.includes("Classes");
-		const isRaces      = !isSubraces && body.includes("Races");
+		// Exclude queries where "Classes"/"Races" appear as a filter *key* (e.g. spell queries
+		// filtered by class: k:\\"Classes\\" or field:\\"Classes\\"). Those are not category queries.
+		const isClasses    = !isSubclasses && body.includes("Classes") && !body.match(/[,{](?:field|k)\s*:\s*\\"Classes\\"/);
+		const isRaces      = !isSubraces  && body.includes("Races")   && !body.match(/[,{](?:field|k)\s*:\s*\\"Races\\"/);
 		const isBgs        = body.includes("Backgrounds");
 		const isFeats      = body.includes("Feats") && !isBgs;
 		// Match Items/Lists — body contains \\\"Items\\\" so check for the literal word too
 		const isItems      = body.includes("Items");
 		const isLists      = !isItems && body.includes("Lists");
-
-		if (!isBooks && !isClasses && !isSubclasses && !isSubraces && !isRaces && !isBgs && !isFeats && !isItems && !isLists) return _origFetch.apply(this, args);
+		// Only intercept the standalone spell browser query. Must be mutually exclusive with every
+		// other category flag — if any other category matched, "Spells" is just a property name
+		// in that query body, not the queried category itself.
+		const isSpells        = !isClasses && !isSubclasses && !isSubraces && !isRaces && !isBgs && !isFeats && !isItems && !isLists
+		                        && body.includes("Spells")
+		                        && !body.match(/[,{](?:field|k)\s*:\s*\\"Classes\\"/);
+		// getSpellsFor class-filtered queries: category(name:"Spells") with k:"Classes" filter.
+		// Used by the spell selection modal to load available spells for a given class.
+		const isSpellsForClass = !isClasses && body.includes("Spells") && !isFeats && !isItems
+		                         && !!body.match(/k:\\"Classes\\"/);
+		if (!isBooks && !isClasses && !isSubclasses && !isSubraces && !isRaces && !isBgs && !isFeats && !isItems && !isLists && !isSpells && !isSpellsForClass) return _origFetch.apply(this, args);
 
 
 		const response = await _origFetch.apply(this, args);
@@ -1936,9 +2352,59 @@ function d20plus2024Charactermancer () {
 					d20plus.ut.log(`[Charactermancer] Injected ${entries.length} races/subraces (${pages.length - entries.length} from server)`);
 				}
 				if (isBgs) {
-					const entries = inject(await getBackgrounds(), bgEntry);
+					// Pre-load feat data so buildBgRecords can embed spell choices
+					// for origin feats (e.g. Acolyte → Magic Initiate: Cleric).
+					const allFeats = await getFeats();
+					const featByKey = new Map(allFeats.map(f => [`${f.name.toLowerCase()}|${(f.source||"").toLowerCase()}`, f]));
+					const entries = inject(await getBackgrounds(), bg => bgEntry(bg, featByKey));
 					pages.push(...entries);
 					d20plus.ut.log(`[Charactermancer] Injected ${entries.length} backgrounds (${pages.length - entries.length} from server)`);
+				}
+
+				if (isSpells) {
+					const entries = inject(await getSpells(), spellEntry);
+					pages.push(...entries);
+					d20plus.ut.log(`[Charactermancer] Injected ${entries.length} spells (${pages.length - entries.length} from server)`);
+				}
+
+				if (isSpellsForClass) {
+					// When native has no results (totalPages=0) the early-return doesn't filter out
+					// pages 2+, so ALL page requests would inject and create duplicates.
+					// Only inject on page 1 in that case.
+					const spellPageNum       = parseInt(body.match(/pageNumber:\s*(\d+)/)?.[1] ?? "1");
+					const nativeSpellTotalPg = data?.extensions?.totalPages ?? 0;
+					if (nativeSpellTotalPg === 0 && spellPageNum > 1) {
+						// No native results and this isn't page 1 — skip to avoid duplicates
+					} else {
+						const classMatch  = body.match(/v:\\"([^"\\]+)\\",operator:\\"regex\\",k:\\"Classes\\"/);
+						const className   = classMatch?.[1] || "";
+						const levelMatch    = body.match(/v:(\d+),operator:\\"(eq|lte|leq)\\",k:\\"Level\\"/);
+						const filterLevel   = levelMatch ? parseInt(levelMatch[1]) : -1;
+						const filterLevelOp = levelMatch?.[2] || "eq";
+						if (className) {
+							const allSpells = await getSpells();
+							const filtered  = allSpells.filter(spell => {
+								const classes = (spell.classes?.fromClassList || []).map(c => c.name.toLowerCase());
+								if (!classes.includes(className.toLowerCase())) return false;
+								if (filterLevel < 0) return true;
+								return filterLevelOp === "eq" ? spell.level === filterLevel : spell.level <= filterLevel;
+							});
+							// Deduplicate by spell name, preferring newer sources (XPHB > PHB etc.)
+							// so users see one clean "Fireball" entry rather than "Fireball (PHB)" + "Fireball (XPHB)".
+							const SOURCE_PREF = ["XPHB","PHB","TCE","SCAG","XGE","DMG","MM"];
+							const byName = new Map();
+							for (const spell of filtered) {
+								const key = spell.name.toLowerCase();
+								if (!byName.has(key)) { byName.set(key, spell); continue; }
+								const curPref = SOURCE_PREF.indexOf(byName.get(key).source);
+								const newPref = SOURCE_PREF.indexOf(spell.source);
+								if (newPref !== -1 && (curPref === -1 || newPref < curPref)) byName.set(key, spell);
+							}
+							const entries = inject([...byName.values()], spellEntry);
+							pages.push(...entries);
+							d20plus.ut.log(`[Charactermancer] Injected ${entries.length} ${className} spells (level ${filterLevel < 0 ? "all" : filterLevel})`);
+						}
+					}
 				}
 
 				if (isItems) {

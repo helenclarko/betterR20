@@ -1610,6 +1610,34 @@ function d20plus2024Import() {
 		return "";
 	}
 
+	function parseDuration2024 (durArr) {
+		if (!durArr || !durArr.length) return "Instantaneous";
+		const du = durArr[0];
+		if (du.type === "instantaneous") return "Instantaneous";
+		if (du.type === "permanent") return "Until Dispelled";
+		if (du.type === "special") return "Special";
+		if (du.type === "timed" && du.duration) {
+			const amt = du.duration.amount;
+			const unit = du.duration.type;
+			const plural = amt !== 1 ? "s" : "";
+			if (du.concentration) return `Concentration, up to ${amt} ${unit}${plural}`;
+			return `${amt} ${unit}${plural}`;
+		}
+		return "Instantaneous";
+	}
+
+	function parseCastingTime2024 (timeArr) {
+		if (!timeArr || !timeArr.length) return "Action";
+		const t = timeArr[0];
+		if (t.unit === "action") return "Action";
+		if (t.unit === "bonus") return "Bonus Action";
+		if (t.unit === "reaction") return "Reaction";
+		if (t.unit === "minute") return t.number === 1 ? "1 Minute" : `${t.number} Minutes`;
+		if (t.unit === "hour") return t.number === 1 ? "1 Hour" : `${t.number} Hours`;
+		if (t.unit === "day") return t.number === 1 ? "1 Day" : `${t.number} Days`;
+		return "Action";
+	}
+
 	/**
 	 * Import a single spell into a 2024 character sheet's store attribute.
 	 * When Vetoolscontent is present builds the full native
@@ -1658,35 +1686,7 @@ function d20plus2024Import() {
 
 		// Range and duration as full strings, matching native Roll20 format
 		const range = vc ? Parser.spRangeToFull(vc.range) : (d["Range"] || "");
-		// Build duration from JSON to avoid Parser.spDurationToFull returning raw HTML anchor tags
-		function parseDuration2024 (durArr) {
-			if (!durArr || !durArr.length) return "Instantaneous";
-			const du = durArr[0];
-			if (du.type === "instantaneous") return "Instantaneous";
-			if (du.type === "permanent") return "Until Dispelled";
-			if (du.type === "special") return "Special";
-			if (du.type === "timed" && du.duration) {
-				const amt = du.duration.amount;
-				const unit = du.duration.type;
-				const plural = amt !== 1 ? "s" : "";
-				if (du.concentration) return `Concentration, up to ${amt} ${unit}${plural}`;
-				return `${amt} ${unit}${plural}`;
-			}
-			return "Instantaneous";
-		}
 		const duration = vc ? parseDuration2024(vc.duration) : (d["Duration"] || "");
-		// Build casting time from JSON for the same reason
-		function parseCastingTime2024 (timeArr) {
-			if (!timeArr || !timeArr.length) return "Action";
-			const t = timeArr[0];
-			if (t.unit === "action") return "Action";
-			if (t.unit === "bonus") return "Bonus Action";
-			if (t.unit === "reaction") return "Reaction";
-			if (t.unit === "minute") return t.number === 1 ? "1 Minute" : `${t.number} Minutes`;
-			if (t.unit === "hour") return t.number === 1 ? "1 Hour" : `${t.number} Hours`;
-			if (t.unit === "day") return t.number === 1 ? "1 Day" : `${t.number} Days`;
-			return "Action";
-		}
 		const castingTimeBase = vc ? parseCastingTime2024(vc.time) : (d["Casting Time"] || "Action");
 		const isRitual = vc ? !!(vc.meta && vc.meta.ritual) : (d["Ritual"] || "") === "Yes";
 		const castingTime = isRitual ? `${castingTimeBase} or Ritual` : castingTimeBase;
@@ -2683,6 +2683,20 @@ function d20plus2024Import() {
 	 * Route a drag-drop import to the appropriate 2024 handler.
 	 * Falls back to the standard importData path for unhandled categories.
 	 */
+	d20plus.spellParsers = {
+		parseDamage:        parseSpell2024Damage,
+		parseUpcast:        parseSpell2024Upcast,
+		parseHealDice:      parseSpell2024HealDice,
+		parseHealUpcast:    parseSpell2024HealUpcast,
+		parseRepeat:        parseSpell2024Repeat,
+		parseRepeatUpcast:  parseSpell2024RepeatUpcast,
+		parseCantripLevels: parseSpell2024CantripLevels,
+		parseAoeSize:       parseSpell2024AoeSize,
+		areaTagToShape:     areaTagTo2024Shape,
+		parseDuration:      parseDuration2024,
+		parseCastingTime:   parseCastingTime2024,
+	};
+
 	d20plus.importer.import2024Data = function (charView, data, event, importDataFallback) {
 		const charModel = charView.model;
 		const category = data.data && data.data.Category;
