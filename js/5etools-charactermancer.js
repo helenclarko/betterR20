@@ -1621,7 +1621,7 @@ function d20plus2024Charactermancer () {
 		for (const ab of (feat.ability || [])) {
 			if (ab.hidden) continue;
 			for (const [k, v] of Object.entries(ab)) {
-				if (k === "choose" || k === "hidden") continue;
+				if (k === "choose" || k === "hidden" || k === "max") continue;
 				if (typeof v === "number") {
 					recs.push({
 						name: `${ABV[k] || k} Score Bonus`, parent: feat.name, level: "1",
