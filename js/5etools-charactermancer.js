@@ -1636,7 +1636,6 @@ function d20plus2024Charactermancer () {
 				if (from.length) {
 					recs.push({
 						name: `${feat.name} Ability Score`, parent: feat.name, level: "1",
-						payload: pay({type: "Proficiency Choice", subtype: "Ability Score",
 							list: from, numOfChoices: count, proficiencyLevel: amount}),
 					});
 				}
