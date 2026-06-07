@@ -1003,6 +1003,10 @@ function d20plus2024Charactermancer () {
 			}
 		}
 
+		// Skill proficiencies
+		if (race.skillProficiencies)
+			recs.push(...skillRecords(race.skillProficiencies[0], n))
+
 		// Size
 		recs.push({
 			name: `${n} Size`, level: "1", builderDisplayName: `${sizeName} Size`,
