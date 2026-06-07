@@ -403,22 +403,22 @@ function d20plus2024Charactermancer () {
 		return {
 			name: name, parent: parentName, level: level,
 			payload: pay({type:"Generic Choice",category:"",replace:false,numOfChoices:choicesCount})
-		}
+		};
 	}
 
 	function defenseRecord(defType, damageType, parentName = undefined, level = 1, isCondition = false) {
 		const damageName = damageType.toTitleCase();
 
-		const pl = {type:"Defense",defense:defType}
+		const pl = {type:"Defense",defense:defType};
 		if (isCondition)
-			pl["condition"] = damageName
+			pl["condition"] = damageName;
 		else
-			pl["damage"] = damageName
+			pl["damage"] = damageName;
 
 		return {
 			name: `${damageName} ${defType}`, parent: parentName, level: level,
 			payload: pay(pl),
-		}
+		};
 	}
 
 	function defenseRecords(defType, list, level = 1, isCondition = false) {
@@ -428,13 +428,13 @@ function d20plus2024Charactermancer () {
 			return recs;
 
 		// Choice counter in case there are multiple choices
-		let choiceNum = 1
+		let choiceNum = 1;
 
 		// Add resistances
 		for (r of list) {
 			if (r.choose?.from?.length > 0) {
 				// Handle choice
-				const choiceName = defType + " Choice " + choiceNum
+				const choiceName = defType + " Choice " + choiceNum;
 				recs.push(choiceRecord(choiceName, r.choose.count, undefined, level, isCondition));
 
 				for (choice of r.choose.from) {
@@ -445,7 +445,58 @@ function d20plus2024Charactermancer () {
 				recs.push(defenseRecord(defType, r, undefined, level, isCondition));
 		}
 
-		return recs
+		return recs;
+	}
+
+	function skillRecord(skill, parentName = undefined, level = 1, isExpertise = false) {
+		const name = skill.toTitleCase()
+
+		return {
+			name: `${name} ${isExpertise ? "Expertise" : "Proficiency"}`, parent: parentName, level: level,
+			payload: pay({type: "Proficiency", category: "Skill", proficiency: name, proficiencyLevel: isExpertise ? "Expertise" : "Proficient"}),
+		};
+	}
+
+	function skillChoice(name, options, choicesCount = 1, parentName = undefined, level = 1, isExpertise = false) {
+		return {
+			name: name,
+			parent: parentName, level: level,
+			payload: pay({
+				type: "Proficiency Choice",
+				subtype: "Skill",
+				proficiencyLevel: isExpertise ? "Expertise" : "Proficient",
+				list: options?.map((s)=> s === "any" ? s : s.toTitleCase()) || [],
+				numOfChoices: choicesCount || 2,
+				increaseIfAlreadyAt: false,
+			}),
+		};
+	}
+
+	function skillRecords(list, sourceName = "", parentName = undefined, level = 1, isExpertise = false) {
+		const recs = [];
+
+		if (!list)
+			return recs;
+
+		// Choice counter in case there are multiple choices
+		let choiceNum = 1;
+
+		// Add skills
+		for (const [s, v] of Object.entries(list)) {
+			if (v.from?.length > 0 || s === "any") {
+				const any = s === "any";
+
+				// Handle choice
+				const choiceName = `${sourceName} Skill ${isExpertise ? "Expertise" : "Proficiency"} ${choiceNum > 1 ? '' : choiceNum}`;
+				recs.push(skillChoice(choiceName, any ? [s] : v.from, any ? v : v.count || 1, parentName, level, isExpertise));
+			}
+			else if (Number.isInteger(s))
+				recs.push(skillRecord(v, parentName, level, isExpertise));
+			else
+				recs.push(skillRecord(s, parentName, level, isExpertise));
+		}
+
+		return recs;
 	}
 
 	// ── Class helpers ─────────────────────────────────────────────────────────
@@ -787,23 +838,10 @@ function d20plus2024Charactermancer () {
 			});
 		}
 
-		// Skill proficiency choice
-		const rawSkills = cls.startingProficiencies?.skills;
-		const skillsObj = Array.isArray(rawSkills) ? rawSkills[0] : rawSkills;
-		if (skillsObj?.choose) {
-			recs.push({
-				name: `${n} Skill Proficiency`,
-				parent: basicsName, level: "1", multiclass: "FALSE",
-				payload: pay({
-					type: "Proficiency Choice",
-					subtype: "Skill",
-					proficiencyLevel: "Proficient",
-					list: skillsObj.choose.from || [],
-					numOfChoices: skillsObj.choose.count || 2,
-					increaseIfAlreadyAt: false,
-				}),
-			});
-		}
+		
+		// Skill proficiencies
+		if (cls.startingProficiencies?.skills)
+			recs.push(...skillRecords(cls.startingProficiencies.skills[0], n, basicsName))
 
 		// Starting equipment choices (gold OR specific items)
 		recs.push(...buildEquipRecords(cls, basicsName));
@@ -1130,17 +1168,8 @@ function d20plus2024Charactermancer () {
 			payload: pay({type: "Background", name: n, description: bgDesc})});
 
 		// Skill proficiencies
-		const skillProfs = (bg.skillProficiencies || [])[0] || {};
-		for (const [skill, val] of Object.entries(skillProfs)) {
-			if (!val || skill === "choose") continue;
-			const skillName = skill.charAt(0).toUpperCase() + skill.slice(1).replace(/([A-Z])/g, " $1").trim();
-			recs.push({
-				name: `${skillName} Proficiency`, parent: n, level: "1",
-				builderDisplayName: "Background Proficiencies",
-				payload: pay({type: "Proficiency", category: "Skill", proficiency: skillName,
-					proficiencyLevel: "Proficient", increaseIfAlreadyAt: false}),
-			});
-		}
+		if (bg.skillProficiencies)
+			recs.push(...skillRecords(bg.skillProficiencies[0], n, n))
 
 		// Tool proficiencies — fixed tools and list-choice tools
 		const toolProfs = (bg.toolProficiencies || [])[0] || {};
@@ -1732,14 +1761,8 @@ function d20plus2024Charactermancer () {
 		}
 
 		// Skill proficiencies
-		for (const grp of (feat.skillProficiencies || [])) {
-			for (const [skill, val] of Object.entries(grp)) {
-				if (!val || skill === "choose") continue;
-				const name = skill.charAt(0).toUpperCase() + skill.slice(1).replace(/([A-Z])/g, " $1");
-				recs.push({name: `${name} Proficiency`, parent: n, level: "1",
-					payload: pay({type: "Proficiency", category: "Skill", proficiency: name, proficiencyLevel: "Proficient"})});
-			}
-		}
+		if (feat.skillProficiencies)
+			recs.push(...skillRecords(feat.skillProficiencies[0], n, n))
 
 		// Defenses
 		recs.push(...defenseRecords("Resistance", feat.resist));
