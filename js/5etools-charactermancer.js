@@ -1702,8 +1702,8 @@ function d20plus2024Charactermancer () {
 					// Regular feat ASI choice
 					recs.push({
 						name: `${n} Ability Score`, parent: n, level: "1",
-						payload: pay({type: "Proficiency Choice", subtype: "Ability Score",
-							list: from, numOfChoices: ab.choose.count || 1, proficiencyLevel: ab.choose.amount || 1}),
+						payload: pay({type: "Ability Score Choice",
+							from: from, choose: ab.choose.count || 1, increase: ab.choose.amount || 1}),
 					});
 				}
 			}
