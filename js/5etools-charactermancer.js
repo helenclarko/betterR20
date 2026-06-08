@@ -2005,6 +2005,9 @@ function d20plus2024Charactermancer () {
 			}
 		}
 
+		if (subrace.skillProficiencies)
+			recs.push(...skillRecords(subrace.skillProficiencies[0], n))
+
 		// Feature entries
 		for (const entry of (subrace.entries || [])) {
 			if (!entry?.name) continue;
