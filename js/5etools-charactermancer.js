@@ -499,6 +499,33 @@ function d20plus2024Charactermancer () {
 		return recs;
 	}
 
+	function languageRecords(list, parentName = undefined, level = 1) {
+		const recs = [];
+
+		// Language proficiencies
+		const fixedLangs = Object.entries(list)
+			.filter(([k, v]) => v === true && !k.startsWith("any") && k != "other")
+			.map(([k]) => k.charAt(0).toUpperCase() + k.slice(1));
+		// "other" language is replaced by language choice. This could be replaced by parsing for the unspecified language.
+		const anyLangs = (list.anyStandard || list.any || 0) + (list.other || 0);
+		if (fixedLangs.length || anyLangs) {
+			const langParent = `${parentName || ""} Languages`;
+			recs.push({name: langParent, level: level,
+				payload: pay({type: "Features", name: "Languages",
+					description: `You can speak${fixedLangs.length ? `, read, and write ${fixedLangs.join(", ")}` : ""}${anyLangs ? ` and ${anyLangs} additional language${anyLangs > 1 ? "s" : ""} of your choice` : ""}.`})});
+			for (const lang of fixedLangs) {
+				recs.push({name: `${lang} Proficiency`, parent: langParent, level: level,
+					payload: pay({type: "Language", name: lang})});
+			}
+			if (anyLangs) {
+				recs.push({name: `${parentName || ""} Language Choice`, parent: langParent, level: level,
+					payload: pay({type: "Language Choice", numOfChoices: anyLangs, list: STD_LANGUAGES})});
+			}
+		}
+
+		return recs;
+	}
+
 	// ── Class helpers ─────────────────────────────────────────────────────────
 
 	function savingThrows (cls) {
@@ -1072,27 +1099,8 @@ function d20plus2024Charactermancer () {
 
 		// Language proficiencies
 		const langProfs = (race.languageProficiencies || [])[0] || {};
-		const fixedLangs = Object.entries(langProfs)
-			.filter(([k, v]) => v === true && !k.startsWith("any"))
-			.map(([k]) => k.charAt(0).toUpperCase() + k.slice(1));
-		const anyLangs = langProfs.anyStandard || langProfs.any || 0;
-
-		if (fixedLangs.length || anyLangs) {
-			const langParent = `${n} Languages`;
-			recs.push({
-				name: langParent, level: "1", builderDisplayName: "Language Proficiencies",
-				payload: pay({type: "Features", name: "Languages",
-					description: `You can speak, read, and write ${fixedLangs.join(", ")}${anyLangs ? ` and ${anyLangs} language${anyLangs > 1 ? "s" : ""} of your choice` : ""}.`}),
-			});
-			for (const lang of fixedLangs) {
-				recs.push({name: `${lang} Proficiency`, parent: langParent, level: "1",
-					payload: pay({type: "Language", name: lang})});
-			}
-			if (anyLangs) {
-				recs.push({name: `${n} Language Choice`, parent: langParent, level: "1",
-					payload: pay({type: "Language Choice", numOfChoices: anyLangs, list: STD_LANGUAGES})});
-			}
-		}
+		if (langProfs)
+			recs.push(...languageRecords(langProfs, n))
 
 		return recs;
 	}
@@ -1207,12 +1215,8 @@ function d20plus2024Charactermancer () {
 
 		// Language proficiency choice
 		const langProfs = (bg.languageProficiencies || [])[0] || {};
-		const anyLangs = langProfs.anyStandard || langProfs.any || 0;
-		if (anyLangs) {
-			recs.push({name: `Language Choice`, parent: n, level: "1",
-				builderDisplayName: "Background Language Proficiency",
-				payload: pay({type: "Language Choice", numOfChoices: anyLangs, list: STD_LANGUAGES})});
-		}
+		if (langProfs)
+			recs.push(...languageRecords(langProfs, n))
 
 		// Starting equipment — use a choice container (matches PHB format) so the equipment
 		// section renders correctly.  Currency is placed OUTSIDE the container so it is
@@ -2016,26 +2020,11 @@ function d20plus2024Charactermancer () {
 				payload: pay({type: "Features", name: entry.name, description: desc})});
 		}
 
+		/* This has been disabled for the sake of preventing duplicates. If any subraces provide languages, this may need to be uncommented
 		// Language proficiencies
 		const langProfs = (subrace.languageProficiencies || [])[0] || {};
-		const fixedLangs = Object.entries(langProfs)
-			.filter(([k, v]) => v === true && !k.startsWith("any"))
-			.map(([k]) => k.charAt(0).toUpperCase() + k.slice(1));
-		const anyLangs = langProfs.anyStandard || langProfs.any || 0;
-		if (fixedLangs.length || anyLangs) {
-			const langParent = `${n} Languages`;
-			recs.push({name: langParent, level: "1",
-				payload: pay({type: "Features", name: "Languages",
-					description: `You can speak${fixedLangs.length ? `, read, and write ${fixedLangs.join(", ")}` : ""}${anyLangs ? ` and ${anyLangs} additional language${anyLangs > 1 ? "s" : ""} of your choice` : ""}.`})});
-			for (const lang of fixedLangs) {
-				recs.push({name: `${lang} Proficiency`, parent: langParent, level: "1",
-					payload: pay({type: "Language", name: lang})});
-			}
-			if (anyLangs) {
-				recs.push({name: `${n} Language Choice`, parent: langParent, level: "1",
-					payload: pay({type: "Language Choice", numOfChoices: anyLangs, list: STD_LANGUAGES})});
-			}
-		}
+		if (langProfs)
+			recs.push(...languageRecords(langProfs, n))*/
 
 		// Darkvision override
 		if (subrace.darkvision) {
