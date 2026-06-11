@@ -326,6 +326,7 @@ function d20plus2024Charactermancer () {
 					"AT":  "Artisan's Tools Proficiency",
 					"GS":  "Gaming Sets Proficiency",
 					"INS": "Musical Instruments Proficiency",
+					"T": "Other Tool Proficiency",
 				};
 				// Load all items including base items
 				const [allItems, baseItems] = await Promise.all([
@@ -347,6 +348,7 @@ function d20plus2024Charactermancer () {
 				}
 				// Sort each list alphabetically
 				for (const list of Object.values(byList)) list.sort();
+				_toolProfsP = byList
 				return byList;
 			})().catch(() => ({}));
 		}
@@ -380,7 +382,7 @@ function d20plus2024Charactermancer () {
 	}
 
 	function cleanProf (raw) {
-		return raw.replace(/\{@[a-z]+\s+/gi, "").replace(/\}/g, "").trim();
+		return raw.split("|", 1)[0].replace(/\{@[a-z]+\s+/gi, "").replace(/\}/g, "").trim();
 	}
 
 	// 5etools sources that belong to the 2024 D&D system
@@ -403,22 +405,22 @@ function d20plus2024Charactermancer () {
 		return {
 			name: name, parent: parentName, level: level,
 			payload: pay({type:"Generic Choice",category:"",replace:false,numOfChoices:choicesCount})
-		}
+		};
 	}
 
 	function defenseRecord(defType, damageType, parentName = undefined, level = 1, isCondition = false) {
 		const damageName = damageType.toTitleCase();
 
-		const pl = {type:"Defense",defense:defType}
+		const pl = {type:"Defense",defense:defType};
 		if (isCondition)
-			pl["condition"] = damageName
+			pl["condition"] = damageName;
 		else
-			pl["damage"] = damageName
+			pl["damage"] = damageName;
 
 		return {
 			name: `${damageName} ${defType}`, parent: parentName, level: level,
 			payload: pay(pl),
-		}
+		};
 	}
 
 	function defenseRecords(defType, list, level = 1, isCondition = false) {
@@ -428,13 +430,13 @@ function d20plus2024Charactermancer () {
 			return recs;
 
 		// Choice counter in case there are multiple choices
-		let choiceNum = 1
+		let choiceNum = 1;
 
 		// Add resistances
 		for (r of list) {
 			if (r.choose?.from?.length > 0) {
 				// Handle choice
-				const choiceName = defType + " Choice " + choiceNum
+				const choiceName = defType + " Choice " + choiceNum;
 				recs.push(choiceRecord(choiceName, r.choose.count, undefined, level, isCondition));
 
 				for (choice of r.choose.from) {
@@ -445,7 +447,154 @@ function d20plus2024Charactermancer () {
 				recs.push(defenseRecord(defType, r, undefined, level, isCondition));
 		}
 
-		return recs
+		return recs;
+	}
+
+	function skillRecord(skill, parentName = undefined, level = 1, isExpertise = false) {
+		const name = skill.toTitleCase()
+
+		return {
+			name: `${name} ${isExpertise ? "Expertise" : "Proficiency"}`, parent: parentName, level: level,
+			payload: pay({type: "Proficiency", category: "Skill", proficiency: name, proficiencyLevel: isExpertise ? "Expertise" : "Proficient"}),
+		};
+	}
+
+	function skillChoice(name, options, choicesCount = 1, parentName = undefined, level = 1, isExpertise = false) {
+		return {
+			name: name,
+			parent: parentName, level: level,
+			payload: pay({
+				type: "Proficiency Choice",
+				subtype: "Skill",
+				proficiencyLevel: isExpertise ? "Expertise" : "Proficient",
+				list: options?.map((s)=> s === "any" ? s : s.toTitleCase()) || [],
+				numOfChoices: choicesCount || 2,
+				increaseIfAlreadyAt: false,
+			}),
+		};
+	}
+
+	function skillRecords(list, sourceName = "", parentName = undefined, level = 1, isExpertise = false) {
+		const recs = [];
+
+		if (!list)
+			return recs;
+
+		// Choice counter in case there are multiple choices
+		let choiceNum = 1;
+
+		// Add skills
+		for (const [s, v] of Object.entries(list)) {
+			if (v.from?.length > 0 || s === "any") {
+				const any = s === "any";
+
+				// Handle choice
+				const choiceName = `${sourceName} Skill ${isExpertise ? "Expertise" : "Proficiency"} ${choiceNum > 1 ? '' : choiceNum}`;
+				recs.push(skillChoice(choiceName, any ? [s] : v.from, any ? v : v.count || 1, parentName, level, isExpertise));
+			}
+			else if (Number.isInteger(s))
+				recs.push(skillRecord(v, parentName, level, isExpertise));
+			else
+				recs.push(skillRecord(s, parentName, level, isExpertise));
+		}
+
+		return recs;
+	}
+
+	function languageRecords(list, parentName = undefined, level = 1) {
+		const recs = [];
+
+		// Language proficiencies
+		const fixedLangs = Object.entries(list)
+			.filter(([k, v]) => v === true && !k.startsWith("any") && k != "other")
+			.map(([k]) => k.charAt(0).toUpperCase() + k.slice(1));
+		// "other" language is replaced by language choice. This could be replaced by parsing for the unspecified language.
+		const anyLangs = (list.anyStandard || list.any || 0) + (list.other || 0);
+		if (fixedLangs.length || anyLangs) {
+			const langParent = `${parentName || ""} Languages`;
+			recs.push({name: langParent, level: level,
+				payload: pay({type: "Features", name: "Languages",
+					description: `You can speak${fixedLangs.length ? `, read, and write ${fixedLangs.join(", ")}` : ""}${anyLangs ? ` and ${anyLangs} additional language${anyLangs > 1 ? "s" : ""} of your choice` : ""}.`})});
+			for (const lang of fixedLangs) {
+				recs.push({name: `${lang} Proficiency`, parent: langParent, level: level,
+					payload: pay({type: "Language", name: lang})});
+			}
+			if (anyLangs) {
+				recs.push({name: `${parentName || ""} Language Choice`, parent: langParent, level: level,
+					payload: pay({type: "Language Choice", numOfChoices: anyLangs, list: STD_LANGUAGES})});
+			}
+		}
+
+		return recs;
+	}
+
+	// Tool lists must be cached before this function is called
+	function parseTools(name, choices = undefined) {
+		// Treat name as a choice
+		if (name === "any") {
+			name = "choose"
+
+			choices = {
+				from: Object.keys(BG_TOOL_LIST)
+			}
+		}
+
+		// Handle choice by calling recursively
+		if (name === "choose") {
+			const tools = []
+
+			for (const choice of choices.from) {
+				tools.push(...parseTools(choice));
+			}
+
+			return tools;
+		}
+
+		// Check for list
+		const listRef = BG_TOOL_LIST[name];
+		if (listRef && _toolProfsP) {
+			// Use explicit tool names from 5etools data (same approach as native Dwarf class).
+			// This avoids a "Lists:..." server query that returns 0 items and grays out the dropdown.
+			const listKey = listRef.replace("Lists:", "");
+			const toolNames = _toolProfsP[listKey] || [];
+			const list = toolNames.length ? toolNames : [listRef];
+			return list;
+		}
+
+		// Just return a cleaned version of the tool
+		return [cleanToolName(name)]
+	}
+
+	function toolRecords(toolProfs, parentName = undefined, level = 1) {
+		recs = [];
+
+		// - fixed tools and list-choice tools
+		for (let [tool, val] of Object.entries(toolProfs)) {
+			if (!val) continue;
+
+			// Either return a list to choose from or a cleaned version of one tool
+			let tools = parseTools(tool, val);
+
+			if (tools.length > 1) {
+				const count = typeof val === "number" ? val : (val.count || 1);
+				
+				recs.push({
+					name: `${tool === "any" ? "Tool" : cleanToolName(tool)} Proficiency`, parent: parentName, level: "1",
+					builderDisplayName: "Background Proficiencies",
+					payload: pay({type: "Proficiency Choice", subtype: "Tool",
+						proficiencyLevel: "Proficient", list: tools, numOfChoices: count,
+						increaseIfAlreadyAt: false}),
+				});
+			} else {
+				recs.push({
+					name: `${tools[0]} Proficiency`, parent: parentName, level: "1",
+					builderDisplayName: "Background Proficiencies",
+					payload: pay({type: "Proficiency", category: "Tool", proficiency: tools[0],
+						proficiencyLevel: "Proficient", increaseIfAlreadyAt: false}),
+				});
+			}
+		}
+    	return recs;
 	}
 
 	// ── Class helpers ─────────────────────────────────────────────────────────
@@ -787,23 +936,15 @@ function d20plus2024Charactermancer () {
 			});
 		}
 
-		// Skill proficiency choice
-		const rawSkills = cls.startingProficiencies?.skills;
-		const skillsObj = Array.isArray(rawSkills) ? rawSkills[0] : rawSkills;
-		if (skillsObj?.choose) {
-			recs.push({
-				name: `${n} Skill Proficiency`,
-				parent: basicsName, level: "1", multiclass: "FALSE",
-				payload: pay({
-					type: "Proficiency Choice",
-					subtype: "Skill",
-					proficiencyLevel: "Proficient",
-					list: skillsObj.choose.from || [],
-					numOfChoices: skillsObj.choose.count || 2,
-					increaseIfAlreadyAt: false,
-				}),
-			});
-		}
+		
+		// Skill proficiencies
+		if (cls.startingProficiencies?.skills)
+			recs.push(...skillRecords(cls.startingProficiencies.skills[0], n, basicsName))
+		
+		// Tool proficiencies
+		const toolProfs = (cls.startingProficiencies?.toolProficiencies || [])[0] || false;
+		if (toolProfs)
+			recs.push(...toolRecords(toolProfs, basicsName));
 
 		// Starting equipment choices (gold OR specific items)
 		recs.push(...buildEquipRecords(cls, basicsName));
@@ -965,6 +1106,10 @@ function d20plus2024Charactermancer () {
 			}
 		}
 
+		// Skill proficiencies
+		if (race.skillProficiencies)
+			recs.push(...skillRecords(race.skillProficiencies[0], n))
+
 		// Size
 		recs.push({
 			name: `${n} Size`, level: "1", builderDisplayName: `${sizeName} Size`,
@@ -1028,29 +1173,15 @@ function d20plus2024Charactermancer () {
 				payload: pay({type: "Features", name: entry.name, description: desc})});
 		}
 
-		// Language proficiencies
-		const langProfs = (race.languageProficiencies || [])[0] || {};
-		const fixedLangs = Object.entries(langProfs)
-			.filter(([k, v]) => v === true && !k.startsWith("any"))
-			.map(([k]) => k.charAt(0).toUpperCase() + k.slice(1));
-		const anyLangs = langProfs.anyStandard || langProfs.any || 0;
+		// Tool proficiencies
+		const toolProfs = (race.toolProficiencies || [])[0] || false;
+		if (toolProfs)
+			recs.push(...toolRecords(toolProfs));
 
-		if (fixedLangs.length || anyLangs) {
-			const langParent = `${n} Languages`;
-			recs.push({
-				name: langParent, level: "1", builderDisplayName: "Language Proficiencies",
-				payload: pay({type: "Features", name: "Languages",
-					description: `You can speak, read, and write ${fixedLangs.join(", ")}${anyLangs ? ` and ${anyLangs} language${anyLangs > 1 ? "s" : ""} of your choice` : ""}.`}),
-			});
-			for (const lang of fixedLangs) {
-				recs.push({name: `${lang} Proficiency`, parent: langParent, level: "1",
-					payload: pay({type: "Language", name: lang})});
-			}
-			if (anyLangs) {
-				recs.push({name: `${n} Language Choice`, parent: langParent, level: "1",
-					payload: pay({type: "Language Choice", numOfChoices: anyLangs, list: STD_LANGUAGES})});
-			}
-		}
+		// Language proficiencies
+		const langProfs = (race.languageProficiencies || [])[0] || false;
+		if (langProfs)
+			recs.push(...languageRecords(langProfs, n));
 
 		return recs;
 	}
@@ -1062,6 +1193,7 @@ function d20plus2024Charactermancer () {
 		anyGamingSet:         "Lists:Gaming Sets Proficiency",
 		anyMusicalInstrument: "Lists:Musical Instruments Proficiency",
 		anyArtisansTool:      "Lists:Artisan's Tools Proficiency",
+		otherTool:			  "Lists:Other Tool Proficiency",
 	};
 
 	// Convert a 5etools tool key to a human-readable display name.
@@ -1120,7 +1252,7 @@ function d20plus2024Charactermancer () {
 		return result;
 	}
 
-	function buildBgRecords (bg, featByKey, toolProfLists = {}) {
+	function buildBgRecords (bg, featByKey) {
 		const recs = [];
 		const n = bg.name;
 
@@ -1130,56 +1262,18 @@ function d20plus2024Charactermancer () {
 			payload: pay({type: "Background", name: n, description: bgDesc})});
 
 		// Skill proficiencies
-		const skillProfs = (bg.skillProficiencies || [])[0] || {};
-		for (const [skill, val] of Object.entries(skillProfs)) {
-			if (!val || skill === "choose") continue;
-			const skillName = skill.charAt(0).toUpperCase() + skill.slice(1).replace(/([A-Z])/g, " $1").trim();
-			recs.push({
-				name: `${skillName} Proficiency`, parent: n, level: "1",
-				builderDisplayName: "Background Proficiencies",
-				payload: pay({type: "Proficiency", category: "Skill", proficiency: skillName,
-					proficiencyLevel: "Proficient", increaseIfAlreadyAt: false}),
-			});
-		}
+		if (bg.skillProficiencies)
+			recs.push(...skillRecords(bg.skillProficiencies[0], n, n))
 
-		// Tool proficiencies — fixed tools and list-choice tools
-		const toolProfs = (bg.toolProficiencies || [])[0] || {};
-		for (const [tool, val] of Object.entries(toolProfs)) {
-			if (!val || tool === "choose") continue;
-			const listRef = BG_TOOL_LIST[tool];
-			const toolDisplay = cleanToolName(tool);
-			if (listRef) {
-				const count = typeof val === "number" ? val : 1;
-				// Use explicit tool names from 5etools data (same approach as native Dwarf class).
-				// This avoids a "Lists:..." server query that returns 0 items and grays out the dropdown.
-				const listKey = listRef.replace("Lists:", "");
-				const toolNames = toolProfLists[listKey] || [];
-				const list = toolNames.length ? toolNames : [listRef];
-				recs.push({
-					name: `${toolDisplay} Proficiency`, parent: n, level: "1",
-					builderDisplayName: "Background Proficiencies",
-					payload: pay({type: "Proficiency Choice", subtype: "Tool",
-						proficiencyLevel: "Proficient", list, numOfChoices: count,
-						increaseIfAlreadyAt: false}),
-				});
-			} else {
-				recs.push({
-					name: `${toolDisplay} Proficiency`, parent: n, level: "1",
-					builderDisplayName: "Background Proficiencies",
-					payload: pay({type: "Proficiency", category: "Tool", proficiency: toolDisplay,
-						proficiencyLevel: "Proficient", increaseIfAlreadyAt: false}),
-				});
-			}
-		}
+		// Tool proficiencies
+		const toolProfs = (bg.toolProficiencies || [])[0] || false;
+		if (toolProfs)
+			recs.push(...toolRecords(toolProfs, n));
 
 		// Language proficiency choice
-		const langProfs = (bg.languageProficiencies || [])[0] || {};
-		const anyLangs = langProfs.anyStandard || langProfs.any || 0;
-		if (anyLangs) {
-			recs.push({name: `Language Choice`, parent: n, level: "1",
-				builderDisplayName: "Background Language Proficiency",
-				payload: pay({type: "Language Choice", numOfChoices: anyLangs, list: STD_LANGUAGES})});
-		}
+		const langProfs = (bg.languageProficiencies || [])[0] || false;
+		if (langProfs)
+			recs.push(...languageRecords(langProfs, n));
 
 		// Starting equipment — use a choice container (matches PHB format) so the equipment
 		// section renders correctly.  Currency is placed OUTSIDE the container so it is
@@ -1378,7 +1472,7 @@ function d20plus2024Charactermancer () {
 		return entry;
 	}
 
-	function bgEntry (bg, featByKey, toolProfLists = {}) {
+	function bgEntry (bg, featByKey) {
 		const tables = extractBgTables(bg);
 		const gold   = BG_GOLD[bg.name] ?? 15;
 
@@ -1411,7 +1505,7 @@ function d20plus2024Charactermancer () {
 				"filter-Feat": bg.feats?.length ? "Yes" : "No",
 				...(originFeatName   ? {"filter-Origin Feat":   originFeatName}   : {}),
 				...(abilityScoreFilter ? {"filter-Ability Score": abilityScoreFilter} : {}),
-				"data-datarecords": JSON.stringify(buildBgRecords(bg, featByKey, toolProfLists)),
+				"data-datarecords": JSON.stringify(buildBgRecords(bg, featByKey)),
 				"data-Starting Gold": gold,
 				...(tables.traits.length  ? {"data-Personality Traits": JSON.stringify(tables.traits)} : {}),
 				...(tables.bonds.length   ? {"data-Bonds":              JSON.stringify(tables.bonds)}  : {}),
@@ -1673,7 +1767,7 @@ function d20plus2024Charactermancer () {
 		for (const ab of (feat.ability || [])) {
 			if (ab.hidden) continue;
 			for (const [k, v] of Object.entries(ab)) {
-				if (k === "choose" || k === "hidden") continue;
+				if (k === "choose" || k === "hidden" || k === "max") continue;
 				if (typeof v === "number") {
 					recs.push({
 						name: `${ABV[k] || k} Score Bonus`, parent: n, level: "1",
@@ -1702,8 +1796,8 @@ function d20plus2024Charactermancer () {
 					// Regular feat ASI choice
 					recs.push({
 						name: `${n} Ability Score`, parent: n, level: "1",
-						payload: pay({type: "Proficiency Choice", subtype: "Ability Score",
-							list: from, numOfChoices: ab.choose.count || 1, proficiencyLevel: ab.choose.amount || 1}),
+						payload: pay({type: "Ability Score Choice",
+							from: from, choose: ab.choose.count || 1, increase: ab.choose.amount || 1}),
 					});
 				}
 			}
@@ -1732,14 +1826,13 @@ function d20plus2024Charactermancer () {
 		}
 
 		// Skill proficiencies
-		for (const grp of (feat.skillProficiencies || [])) {
-			for (const [skill, val] of Object.entries(grp)) {
-				if (!val || skill === "choose") continue;
-				const name = skill.charAt(0).toUpperCase() + skill.slice(1).replace(/([A-Z])/g, " $1");
-				recs.push({name: `${name} Proficiency`, parent: n, level: "1",
-					payload: pay({type: "Proficiency", category: "Skill", proficiency: name, proficiencyLevel: "Proficient"})});
-			}
-		}
+		if (feat.skillProficiencies)
+			recs.push(...skillRecords(feat.skillProficiencies[0], n, n));
+
+		// Tool proficiencies
+		const toolProfs = (feat.toolProficiencies || [])[0] || false;
+		if (toolProfs)
+			recs.push(...toolRecords(toolProfs, n));
 
 		// Defenses
 		recs.push(...defenseRecords("Resistance", feat.resist));
@@ -1978,6 +2071,9 @@ function d20plus2024Charactermancer () {
 			}
 		}
 
+		if (subrace.skillProficiencies)
+			recs.push(...skillRecords(subrace.skillProficiencies[0], n))
+
 		// Feature entries
 		for (const entry of (subrace.entries || [])) {
 			if (!entry?.name) continue;
@@ -1986,26 +2082,11 @@ function d20plus2024Charactermancer () {
 				payload: pay({type: "Features", name: entry.name, description: desc})});
 		}
 
+		/* This has been disabled for the sake of preventing duplicates. If any subraces provide languages, this may need to be uncommented
 		// Language proficiencies
-		const langProfs = (subrace.languageProficiencies || [])[0] || {};
-		const fixedLangs = Object.entries(langProfs)
-			.filter(([k, v]) => v === true && !k.startsWith("any"))
-			.map(([k]) => k.charAt(0).toUpperCase() + k.slice(1));
-		const anyLangs = langProfs.anyStandard || langProfs.any || 0;
-		if (fixedLangs.length || anyLangs) {
-			const langParent = `${n} Languages`;
-			recs.push({name: langParent, level: "1",
-				payload: pay({type: "Features", name: "Languages",
-					description: `You can speak${fixedLangs.length ? `, read, and write ${fixedLangs.join(", ")}` : ""}${anyLangs ? ` and ${anyLangs} additional language${anyLangs > 1 ? "s" : ""} of your choice` : ""}.`})});
-			for (const lang of fixedLangs) {
-				recs.push({name: `${lang} Proficiency`, parent: langParent, level: "1",
-					payload: pay({type: "Language", name: lang})});
-			}
-			if (anyLangs) {
-				recs.push({name: `${n} Language Choice`, parent: langParent, level: "1",
-					payload: pay({type: "Language Choice", numOfChoices: anyLangs, list: STD_LANGUAGES})});
-			}
-		}
+		const langProfs = (subrace.languageProficiencies || [])[0] || false;
+		if (langProfs)
+			recs.push(...languageRecords(langProfs, n));*/
 
 		// Darkvision override
 		if (subrace.darkvision) {
@@ -2386,6 +2467,13 @@ function d20plus2024Charactermancer () {
 				})
 			}
 
+			// Make sure tool proficiency lists are cached
+			// Cached toolProfs are used in records so "any*" tool choices use explicit
+			// name arrays (like native Dwarf) rather than "Lists:..." references, which
+			// cause a grayed-out dropdown when Roll20 can't serve the list.
+			if (!_toolProfsP)
+				await getToolProfLists();
+
 			if (isBooks) {
 				const books = data?.data?.ruleSystem?.books;
 				if (Array.isArray(books) && !books.find(b => b.itemId === "5")) {
@@ -2515,13 +2603,10 @@ function d20plus2024Charactermancer () {
 					console.log(`[B20 Races] ${pages.length - entries.length} native + ${entries.length} injected = ${pages.length} total`);
 				}
 				if (isBgs) {
-					// Pre-load feat data and tool proficiency lists in parallel.
-					// toolProfs is passed into buildBgRecords so "any*" tool choices use explicit
-					// name arrays (like native Dwarf) rather than "Lists:..." references, which
-					// cause a grayed-out dropdown when Roll20 can't serve the list.
-					const [allFeats, toolProfs] = await Promise.all([getFeats(), getToolProfLists()]);
+					// Pre-load feat data for granting by backgrounds
+					const allFeats = await getFeats();
 					const featByKey = new Map(allFeats.map(f => [`${f.name.toLowerCase()}|${(f.source||"").toLowerCase()}`, f]));
-					const entries = inject(await getBackgrounds(), bg => bgEntry(bg, featByKey, toolProfs));
+					const entries = inject(await getBackgrounds(), bg => bgEntry(bg, featByKey));
 					pages.push(...entries);
 					d20plus.ut.log(`[Charactermancer] Injected ${entries.length} backgrounds (${pages.length - entries.length} from server)`);
 					console.log(`[B20 Backgrounds] ${pages.length - entries.length} native + ${entries.length} injected = ${pages.length} total`);
