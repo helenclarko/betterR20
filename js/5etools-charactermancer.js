@@ -526,6 +526,44 @@ function d20plus2024Charactermancer () {
 		return recs;
 	}
 
+	function toolRecords(toolProfs, parentName = undefined, level = 1) {
+		// Tool lists must be cached before this function is called
+		if (!_toolProfsP)
+			return [];
+
+		recs = [];
+
+		// - fixed tools and list-choice tools
+		for (const [tool, val] of Object.entries(toolProfs)) {
+			if (!val || tool === "choose") continue;
+			const listRef = BG_TOOL_LIST[tool];
+			const toolDisplay = cleanToolName(tool);
+			if (listRef) {
+				const count = typeof val === "number" ? val : 1;
+				// Use explicit tool names from 5etools data (same approach as native Dwarf class).
+				// This avoids a "Lists:..." server query that returns 0 items and grays out the dropdown.
+				const listKey = listRef.replace("Lists:", "");
+				const toolNames = _toolProfsP[listKey] || [];
+				const list = toolNames.length ? toolNames : [listRef];
+				recs.push({
+					name: `${toolDisplay} Proficiency`, parent: parentName, level: "1",
+					builderDisplayName: "Background Proficiencies",
+					payload: pay({type: "Proficiency Choice", subtype: "Tool",
+						proficiencyLevel: "Proficient", list, numOfChoices: count,
+						increaseIfAlreadyAt: false}),
+				});
+			} else {
+				recs.push({
+					name: `${toolDisplay} Proficiency`, parent: parentName, level: "1",
+					builderDisplayName: "Background Proficiencies",
+					payload: pay({type: "Proficiency", category: "Tool", proficiency: toolDisplay,
+						proficiencyLevel: "Proficient", increaseIfAlreadyAt: false}),
+				});
+			}
+		}
+    	return recs;
+	}
+
 	// ── Class helpers ─────────────────────────────────────────────────────────
 
 	function savingThrows (cls) {
@@ -869,6 +907,11 @@ function d20plus2024Charactermancer () {
 		// Skill proficiencies
 		if (cls.startingProficiencies?.skills)
 			recs.push(...skillRecords(cls.startingProficiencies.skills[0], n, basicsName))
+		
+		// Tool proficiencies
+		const toolProfs = (cls.startingProficiencies?.toolProficiencies || [])[0] || false;
+		if (toolProfs)
+			recs.push(...toolRecords(toolProfs, basicsName));
 
 		// Starting equipment choices (gold OR specific items)
 		recs.push(...buildEquipRecords(cls, basicsName));
@@ -1097,10 +1140,15 @@ function d20plus2024Charactermancer () {
 				payload: pay({type: "Features", name: entry.name, description: desc})});
 		}
 
+		// Tool proficiencies
+		const toolProfs = (race.toolProficiencies || [])[0] || false;
+		if (toolProfs)
+			recs.push(...toolRecords(toolProfs));
+
 		// Language proficiencies
-		const langProfs = (race.languageProficiencies || [])[0] || {};
+		const langProfs = (race.languageProficiencies || [])[0] || false;
 		if (langProfs)
-			recs.push(...languageRecords(langProfs, n))
+			recs.push(...languageRecords(langProfs, n));
 
 		return recs;
 	}
@@ -1170,7 +1218,7 @@ function d20plus2024Charactermancer () {
 		return result;
 	}
 
-	function buildBgRecords (bg, featByKey, toolProfLists = {}) {
+	function buildBgRecords (bg, featByKey) {
 		const recs = [];
 		const n = bg.name;
 
@@ -1183,40 +1231,15 @@ function d20plus2024Charactermancer () {
 		if (bg.skillProficiencies)
 			recs.push(...skillRecords(bg.skillProficiencies[0], n, n))
 
-		// Tool proficiencies — fixed tools and list-choice tools
-		const toolProfs = (bg.toolProficiencies || [])[0] || {};
-		for (const [tool, val] of Object.entries(toolProfs)) {
-			if (!val || tool === "choose") continue;
-			const listRef = BG_TOOL_LIST[tool];
-			const toolDisplay = cleanToolName(tool);
-			if (listRef) {
-				const count = typeof val === "number" ? val : 1;
-				// Use explicit tool names from 5etools data (same approach as native Dwarf class).
-				// This avoids a "Lists:..." server query that returns 0 items and grays out the dropdown.
-				const listKey = listRef.replace("Lists:", "");
-				const toolNames = toolProfLists[listKey] || [];
-				const list = toolNames.length ? toolNames : [listRef];
-				recs.push({
-					name: `${toolDisplay} Proficiency`, parent: n, level: "1",
-					builderDisplayName: "Background Proficiencies",
-					payload: pay({type: "Proficiency Choice", subtype: "Tool",
-						proficiencyLevel: "Proficient", list, numOfChoices: count,
-						increaseIfAlreadyAt: false}),
-				});
-			} else {
-				recs.push({
-					name: `${toolDisplay} Proficiency`, parent: n, level: "1",
-					builderDisplayName: "Background Proficiencies",
-					payload: pay({type: "Proficiency", category: "Tool", proficiency: toolDisplay,
-						proficiencyLevel: "Proficient", increaseIfAlreadyAt: false}),
-				});
-			}
-		}
+		// Tool proficiencies
+		const toolProfs = (bg.toolProficiencies || [])[0] || false;
+		if (toolProfs)
+			recs.push(...toolRecords(toolProfs, n));
 
 		// Language proficiency choice
-		const langProfs = (bg.languageProficiencies || [])[0] || {};
+		const langProfs = (bg.languageProficiencies || [])[0] || false;
 		if (langProfs)
-			recs.push(...languageRecords(langProfs, n))
+			recs.push(...languageRecords(langProfs, n));
 
 		// Starting equipment — use a choice container (matches PHB format) so the equipment
 		// section renders correctly.  Currency is placed OUTSIDE the container so it is
@@ -1415,7 +1438,7 @@ function d20plus2024Charactermancer () {
 		return entry;
 	}
 
-	function bgEntry (bg, featByKey, toolProfLists = {}) {
+	function bgEntry (bg, featByKey) {
 		const tables = extractBgTables(bg);
 		const gold   = BG_GOLD[bg.name] ?? 15;
 
@@ -1448,7 +1471,7 @@ function d20plus2024Charactermancer () {
 				"filter-Feat": bg.feats?.length ? "Yes" : "No",
 				...(originFeatName   ? {"filter-Origin Feat":   originFeatName}   : {}),
 				...(abilityScoreFilter ? {"filter-Ability Score": abilityScoreFilter} : {}),
-				"data-datarecords": JSON.stringify(buildBgRecords(bg, featByKey, toolProfLists)),
+				"data-datarecords": JSON.stringify(buildBgRecords(bg, featByKey)),
 				"data-Starting Gold": gold,
 				...(tables.traits.length  ? {"data-Personality Traits": JSON.stringify(tables.traits)} : {}),
 				...(tables.bonds.length   ? {"data-Bonds":              JSON.stringify(tables.bonds)}  : {}),
@@ -1770,7 +1793,12 @@ function d20plus2024Charactermancer () {
 
 		// Skill proficiencies
 		if (feat.skillProficiencies)
-			recs.push(...skillRecords(feat.skillProficiencies[0], n, n))
+			recs.push(...skillRecords(feat.skillProficiencies[0], n, n));
+
+		// Tool proficiencies
+		const toolProfs = (feat.toolProficiencies || [])[0] || false;
+		if (toolProfs)
+			recs.push(...toolRecords(toolProfs, n));
 
 		// Defenses
 		recs.push(...defenseRecords("Resistance", feat.resist));
@@ -2022,9 +2050,9 @@ function d20plus2024Charactermancer () {
 
 		/* This has been disabled for the sake of preventing duplicates. If any subraces provide languages, this may need to be uncommented
 		// Language proficiencies
-		const langProfs = (subrace.languageProficiencies || [])[0] || {};
+		const langProfs = (subrace.languageProficiencies || [])[0] || false;
 		if (langProfs)
-			recs.push(...languageRecords(langProfs, n))*/
+			recs.push(...languageRecords(langProfs, n));*/
 
 		// Darkvision override
 		if (subrace.darkvision) {
@@ -2405,6 +2433,13 @@ function d20plus2024Charactermancer () {
 				})
 			}
 
+			// Make sure tool proficiency lists are cached
+			// Cached toolProfs are used in records so "any*" tool choices use explicit
+			// name arrays (like native Dwarf) rather than "Lists:..." references, which
+			// cause a grayed-out dropdown when Roll20 can't serve the list.
+			if (!_toolProfsP)
+				await getToolProfLists();
+
 			if (isBooks) {
 				const books = data?.data?.ruleSystem?.books;
 				if (Array.isArray(books) && !books.find(b => b.itemId === "5")) {
@@ -2534,13 +2569,10 @@ function d20plus2024Charactermancer () {
 					console.log(`[B20 Races] ${pages.length - entries.length} native + ${entries.length} injected = ${pages.length} total`);
 				}
 				if (isBgs) {
-					// Pre-load feat data and tool proficiency lists in parallel.
-					// toolProfs is passed into buildBgRecords so "any*" tool choices use explicit
-					// name arrays (like native Dwarf) rather than "Lists:..." references, which
-					// cause a grayed-out dropdown when Roll20 can't serve the list.
-					const [allFeats, toolProfs] = await Promise.all([getFeats(), getToolProfLists()]);
+					// Pre-load feat data for granting by backgrounds
+					const allFeats = await getFeats();
 					const featByKey = new Map(allFeats.map(f => [`${f.name.toLowerCase()}|${(f.source||"").toLowerCase()}`, f]));
-					const entries = inject(await getBackgrounds(), bg => bgEntry(bg, featByKey, toolProfs));
+					const entries = inject(await getBackgrounds(), bg => bgEntry(bg, featByKey));
 					pages.push(...entries);
 					d20plus.ut.log(`[Charactermancer] Injected ${entries.length} backgrounds (${pages.length - entries.length} from server)`);
 					console.log(`[B20 Backgrounds] ${pages.length - entries.length} native + ${entries.length} injected = ${pages.length} total`);
