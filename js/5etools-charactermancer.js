@@ -326,6 +326,7 @@ function d20plus2024Charactermancer () {
 					"AT":  "Artisan's Tools Proficiency",
 					"GS":  "Gaming Sets Proficiency",
 					"INS": "Musical Instruments Proficiency",
+					"T": "Other Tool Proficiency",
 				};
 				// Load all items including base items
 				const [allItems, baseItems] = await Promise.all([
@@ -347,6 +348,7 @@ function d20plus2024Charactermancer () {
 				}
 				// Sort each list alphabetically
 				for (const list of Object.values(byList)) list.sort();
+				_toolProfsP = byList
 				return byList;
 			})().catch(() => ({}));
 		}
@@ -526,37 +528,68 @@ function d20plus2024Charactermancer () {
 		return recs;
 	}
 
-	function toolRecords(toolProfs, parentName = undefined, level = 1) {
-		// Tool lists must be cached before this function is called
-		if (!_toolProfsP)
-			return [];
+	// Tool lists must be cached before this function is called
+	function parseTools(name, choices = undefined) {
+		// Treat name as a choice
+		if (name === "any") {
+			name = "choose"
 
+			choices = {
+				from: Object.keys(BG_TOOL_LIST)
+			}
+		}
+
+		// Handle choice by calling recursively
+		if (name === "choose") {
+			const tools = []
+
+			for (const choice of choices.from) {
+				tools.push(...parseTools(choice));
+			}
+
+			return tools;
+		}
+
+		// Check for list
+		const listRef = BG_TOOL_LIST[name];
+		if (listRef && _toolProfsP) {
+			// Use explicit tool names from 5etools data (same approach as native Dwarf class).
+			// This avoids a "Lists:..." server query that returns 0 items and grays out the dropdown.
+			const listKey = listRef.replace("Lists:", "");
+			const toolNames = _toolProfsP[listKey] || [];
+			const list = toolNames.length ? toolNames : [listRef];
+			return list;
+		}
+
+		// Just return a cleaned version of the tool
+		return [cleanToolName(name)]
+	}
+
+	function toolRecords(toolProfs, parentName = undefined, level = 1) {
 		recs = [];
 
 		// - fixed tools and list-choice tools
-		for (const [tool, val] of Object.entries(toolProfs)) {
-			if (!val || tool === "choose") continue;
-			const listRef = BG_TOOL_LIST[tool];
-			const toolDisplay = cleanToolName(tool);
-			if (listRef) {
-				const count = typeof val === "number" ? val : 1;
-				// Use explicit tool names from 5etools data (same approach as native Dwarf class).
-				// This avoids a "Lists:..." server query that returns 0 items and grays out the dropdown.
-				const listKey = listRef.replace("Lists:", "");
-				const toolNames = _toolProfsP[listKey] || [];
-				const list = toolNames.length ? toolNames : [listRef];
+		for (let [tool, val] of Object.entries(toolProfs)) {
+			if (!val) continue;
+
+			// Either return a list to choose from or a cleaned version of one tool
+			let tools = parseTools(tool, val);
+
+			if (tools.length > 1) {
+				const count = typeof val === "number" ? val : (val.count || 1);
+				
 				recs.push({
-					name: `${toolDisplay} Proficiency`, parent: parentName, level: "1",
+					name: `${tool === "any" ? "Tool" : cleanToolName(tool)} Proficiency`, parent: parentName, level: "1",
 					builderDisplayName: "Background Proficiencies",
 					payload: pay({type: "Proficiency Choice", subtype: "Tool",
-						proficiencyLevel: "Proficient", list, numOfChoices: count,
+						proficiencyLevel: "Proficient", list: tools, numOfChoices: count,
 						increaseIfAlreadyAt: false}),
 				});
 			} else {
 				recs.push({
-					name: `${toolDisplay} Proficiency`, parent: parentName, level: "1",
+					name: `${tools[0]} Proficiency`, parent: parentName, level: "1",
 					builderDisplayName: "Background Proficiencies",
-					payload: pay({type: "Proficiency", category: "Tool", proficiency: toolDisplay,
+					payload: pay({type: "Proficiency", category: "Tool", proficiency: tools[0],
 						proficiencyLevel: "Proficient", increaseIfAlreadyAt: false}),
 				});
 			}
@@ -1160,6 +1193,7 @@ function d20plus2024Charactermancer () {
 		anyGamingSet:         "Lists:Gaming Sets Proficiency",
 		anyMusicalInstrument: "Lists:Musical Instruments Proficiency",
 		anyArtisansTool:      "Lists:Artisan's Tools Proficiency",
+		otherTool:			  "Lists:Other Tool Proficiency",
 	};
 
 	// Convert a 5etools tool key to a human-readable display name.
