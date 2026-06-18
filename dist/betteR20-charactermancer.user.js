@@ -389,7 +389,8 @@ function d20plus2024Charactermancer () {
 		}
 		h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
 		h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-		return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(24, "0").slice(0, 24);
+		const hex = (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(24, "0").slice(0, 24);
+		return /^[0-9]+$/.test(hex) ? `f${hex.slice(1)}` : hex;
 	}
 
 	function stripHtml (html) {
