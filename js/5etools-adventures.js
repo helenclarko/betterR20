@@ -110,13 +110,14 @@ function d20plusAdventure () {
 		return result;
 	}
 
-	// Fetch item data from CDN, filtered by name
+	// Fetch item data using the same pipeline as the normal item button (loads mastery/property refs)
 	async function fetchItemData (itemNames) {
 		if (!itemNames.length) return [];
 		const nameSet = new Set(itemNames);
 		try {
-			const data = await DataUtil.loadJSON(ITEM_DATA_URL);
-			return (data.item || []).filter(it => nameSet.has(it.name.toLowerCase()));
+			await Renderer.item.pPopulatePropertyAndTypeReference();
+			const allItems = await Renderer.item.pBuildList();
+			return allItems.filter(it => nameSet.has(it.name.toLowerCase()));
 		} catch (e) {
 			d20plus.ut.log(`Item fetch failed: ${e.message || e}`);
 			return [];
