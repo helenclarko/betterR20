@@ -125,6 +125,31 @@ const d20plusTemplate = function () {
 		});
 	}
 
+	d20plus.template5e._populateBooksDropdown = function () {
+		const $iptUrl = $("#import-books-url");
+		const $sel = $("#button-books-select");
+		const books = (bookMetadata?.book || []).slice().sort((a, b) => SortUtil.ascSortLower(a.name, b.name));
+		books.forEach(b => {
+			$sel.append($("<option>", {
+				value: `${BOOK_DATA_DIR}book-${b.id.toLowerCase()}.json|${b.id}`,
+				text: b.name,
+			}));
+		});
+		$sel.append($("<option>", {value: "", text: "Custom"}));
+		if (books.length) {
+			const first = books[0];
+			const url = `${BOOK_DATA_DIR}book-${first.id.toLowerCase()}.json`;
+			$iptUrl.val(url).data("id", first.id);
+			$sel.val(`${url}|${first.id}`);
+		}
+		$sel.change(() => {
+			const val = $sel.val();
+			if (!val) { $iptUrl.val("").data("id", ""); return; }
+			const [url, id] = val.split("|");
+			$iptUrl.val(url).data("id", id || "");
+		});
+	}
+
 	d20plus.template5e._onDataURLChanging = ($input) => {
 		$input.val() && (d20plus.template5e._dataURLCache = {
 			url: $input.val(),
@@ -164,6 +189,7 @@ const d20plusTemplate = function () {
 			$wrpSettings.append(d20plus.template5e.settingsHtmlSelector());
 			const $ptAdventures = $(d20plus.template5e.settingsHtmlPtAdventures);
 			$wrpSettings.append($ptAdventures);
+			$wrpSettings.append($(d20plus.template5e.settingsHtmlPtBooks));
 
 			IMPORT_CATEGORIES.forEach(ic => {
 				$wrpSettings.append(d20plus.template5e.getSettingsHTML(ic));
@@ -183,6 +209,7 @@ const d20plusTemplate = function () {
 			//d20plus.updateDifficulty();
 
 			d20plus.template5e._populateAdventuresDropdown();
+			d20plus.template5e._populateBooksDropdown();
 
 			// Bind buttons for GM import
 			IMPORT_CATEGORIES.forEach(ic => {
@@ -481,6 +508,18 @@ ${IMPORT_CATEGORIES.filter(ic => ic.playerImport).map(ic => `<option value="${ic
 <p><a class="btn" href="#" id="import-adventures-load">Import Adventure</a><p/>
 <p>
 </p>
+</div>
+`;
+
+	d20plus.template5e.settingsHtmlPtBooks = `
+<div class="importer-section" data-import-group="book">
+<h4>Book Importing</h4>
+<label for="import-books-url">Book Data URL:</label>
+<select id="button-books-select">
+<!-- populate with JS-->
+</select>
+<input type="text" id="import-books-url">
+<p><a class="btn" href="#" id="import-books-load">Import Book</a></p>
 </div>
 `;
 

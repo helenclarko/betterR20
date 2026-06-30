@@ -6,6 +6,7 @@ const betteR205etoolsMain = function () {
 	SPELL_META_URL = `https://5e.tools/data/spells/roll20.json`;
 	MONSTER_DATA_DIR = `${DATA_URL}bestiary/`;
 	ADVENTURE_DATA_DIR = `${DATA_URL}adventure/`;
+	BOOK_DATA_DIR = `${DATA_URL}book/`;
 	CLASS_DATA_DIR = `${DATA_URL}class/`;
 
 	ITEM_DATA_URL = `${DATA_URL}items.json`;
@@ -144,6 +145,12 @@ const betteR205etoolsMain = function () {
 			uniqueImport: true,
 		},
 		{
+			name: "book",
+			plural: "books",
+			baseUrl: BOOK_DATA_DIR,
+			uniqueImport: true,
+		},
+		{
 			name: "background",
 			plural: "backgrounds",
 			playerImport: true,
@@ -232,6 +239,7 @@ const betteR205etoolsMain = function () {
 	let monsterFluffData = {};
 	let monsterMetadata = {};
 	let adventureMetadata = {};
+	let bookMetadata = {};
 	let itemMetadata = {};
 	let classDataUrls = {};
 	let brewIndex = {};
@@ -315,6 +323,7 @@ const betteR205etoolsMain = function () {
 		{name: "bestiary fluff index", url: `${MONSTER_DATA_DIR}fluff-index.json`},
 		{name: "bestiary metadata", url: `${MONSTER_DATA_DIR}legendarygroups.json`},
 		{name: "adventures index", url: `${DATA_URL}adventures.json`},
+		{name: "books index", url: `${DATA_URL}books.json`},
 		{name: "base items", url: `${DATA_URL}items-base.json`},
 		{name: "item modifiers", url: `https://5e.tools/data/roll20-items.json`},
 	];
@@ -334,6 +343,7 @@ const betteR205etoolsMain = function () {
 				else if (it.name === "bestiary fluff index") monsterFluffDataUrls = data;
 				else if (it.name === "bestiary metadata") monsterMetadata = data;
 				else if (it.name === "adventures index") adventureMetadata = data;
+				else if (it.name === "books index") bookMetadata = data;
 				else if (it.name === "base items") {
 					data.itemProperty.forEach(p => Renderer.item._addProperty(p));
 					data.itemType.forEach(t => Renderer.item._addType(t));
